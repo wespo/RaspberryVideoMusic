@@ -13,6 +13,36 @@ RATE=44100
 WIDTH=640
 HEIGHT=480
 S_t = 0
+peak = 0
+
+peakDiamondSize = 5
+peakArray = np.zeros((1,2*peakDiamondSize-1))
+
+def peakDiamonds(data,screen):
+	global peak, peakArray
+	downsampled = signal.resample(data, WIDTH)
+	downsampled = downsampled/40
+	screen.fill((0,0,0))
+	lastsample = 0;
+
+	if max(downsampled) > peak:
+		peak = max(downsampled)
+	else:
+		peak = peak * 0.95
+	peakArray = np.roll(peakArray,-1)
+	peakArray[0,-1] = peak
+	resultMatrix = np.zeros((peakDiamondSize,peakDiamondSize))
+	for idx in range(peakDiamondSize):
+		rowData = np.roll(peakArray,idx-peakDiamondSize)
+		rowData = rowData[0,0:peakDiamondSize]
+		resultMatrix[idx,:] = rowData
+	resultMatrix = np.concatenate((np.fliplr(resultMatrix), resultMatrix), axis=1)
+	resultMatrix = np.concatenate((resultMatrix, np.flipud(resultMatrix)), axis=0)
+	n = 20
+	resultMatrix = np.kron(resultMatrix, np.ones((n,n)))
+	surf = pygame.surfarray.make_surface(resultMatrix)
+	screen.blit(surf, (0, 0))
+	pygame.display.update()
 
 def timeSignal(data, screen):
 	downsampled = signal.resample(data, WIDTH)
@@ -49,7 +79,7 @@ def fftSignal(data, screen):
 		lastsample = sample
 		count = count + 1
 currentDisplay = timeSignal
-displayFunctions =[timeSignal,fftSignal]
+displayFunctions =[peakDiamonds]#[timeSignal,fftSignal,peakDiamonds]
 nextChangeTime = time.time()
 
 # define a main function
