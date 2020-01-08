@@ -158,7 +158,7 @@ def main():
 	# load and set the logo
 	logo = pygame.image.load("logo32x32.png")
 	pygame.display.set_icon(logo)
-	pygame.display.set_caption("minimal program")
+	pygame.display.set_caption("RaspberryVideoMusic")
 
 	# create a surface on screen that has the size of 640 x 480
 	screen = pygame.display.set_mode((WIDTH,HEIGHT))
