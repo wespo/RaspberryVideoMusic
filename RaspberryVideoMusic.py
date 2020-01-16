@@ -8,18 +8,18 @@ from scipy.fftpack import rfft, fftshift
 import time
 import random
 
-chunk=4096
+chunk=410
 RATE=44100
 WIDTH=640
 HEIGHT=480
 S_t = 0
 peak = 0
 
-peakDiamondSize = 5
+peakDiamondSize = 10
 peakArraySize = (2*peakDiamondSize-1)
 peakArray = [0] * peakArraySize #np.zeros((1,2*peakDiamondSize-1))
 
-meanDiamondSize = 32
+meanDiamondSize = 64 #was 16 before
 meanArraySize = (2*meanDiamondSize-1)
 meanArray = [0] * meanArraySize #np.zeros((1,2*peakDiamondSize-1))
 
@@ -34,58 +34,50 @@ def toc():
 	print("Frame Time:" + str(round(1000*(time.time()-tStart))))
 def meanDiamonds(data,screen):
 	global peak, peakArray
-	#tic()
+	# tic()
 	
 	screen.fill((0,0,0))
-	lastsample = 0;
 	
-	peak = np.exp(np.mean(data)*3)
-	# if max(downsampled) > peak:
-	# 	peak = max(downsampled) * 3
-	# else:
-	# 	peak = peak * 0.25
+	peak = pow(2.71,1+sum(abs(data))/len(data)/100)
+	# print(peak)
+	
 
 	meanArray.pop(0)
 	meanArray.append(peak)
 	
 	arrayRows = meanDiamondSize
 	bufferCols = meanArraySize
-	bufferArray = meanArray
-	resultMatrix = np.array([bufferArray.copy()[arrayRows-1:bufferCols]])
-	for offs in range(1,arrayRows):
-		resultMatrix = np.append(resultMatrix,[bufferArray.copy()[arrayRows-1-offs:bufferCols-offs]], axis = 0)
-	
-	surf = pygame.surfarray.make_surface(resultMatrix)
+	bufferArray = meanArray.copy()
+	resultMatrix = []
+	for offs in range(0,arrayRows):
+		resultMatrix.append(bufferArray.copy())
+		lv = bufferArray.pop(0)
+		bufferArray.append(lv)
+
+	surf = pygame.surfarray.make_surface(np.asarray(resultMatrix))
 	surfa = pygame.transform.scale(surf,(320,240))
-	surfb = pygame.transform.rotate(surf,90)
-	surfb = pygame.transform.scale(surfb,(320,240))
-	surfc = pygame.transform.rotate(surf,180)
-	surfc = pygame.transform.scale(surfc,(320,240))
-	surfd = pygame.transform.rotate(surf,270)
-	surfd = pygame.transform.scale(surfd,(320,240))
-	
-	screen.blit(surfb, (0,0))
-	screen.blit(surfa, (320,0))
+	surfb = pygame.transform.flip(surfa,True, False)
+	surfc = pygame.transform.flip(surfa, False ,True)
+	surfd = pygame.transform.flip(surfa,True, True)
+
+	screen.blit(surfa, (0,0))
+	screen.blit(surfb, (320,0))
 	screen.blit(surfc, (0,240))
 	screen.blit(surfd, (320,240))
-	# screen.blit(surfa, (pxlcount*(idxX+1), pxlcount*idxY))
-	# screen.blit(surfc, (pxlcount*idxX, pxlcount*(idxY+1)))
-	# screen.blit(surfd, (pxlcount*(idxX+1), pxlcount*(idxY+1)))
 
-	# timeSignal(data,screen,(0,255,0))
-	#toc()
+	timeSignal(data,screen,(0,255,0))
+	# toc()
 def peakDiamonds(data,screen):
 	global peak, peakArray
 	#tic()
-
+	downsampled = signal.resample(data, WIDTH)
 	screen.fill((0,0,0))
 	lastsample = 0;
 	
-	peak = np.exp(max(data)/30)
-	# if max(downsampled) > peak:
-	# 	peak = max(downsampled) * 3
-	# else:
-	# 	peak = peak * 0.25
+	if max(downsampled) > peak:
+		peak = max(downsampled) * 3
+	else:
+		peak = peak * 0.99
 
 	peakArray.pop(0)
 	peakArray.append(peak)
@@ -102,13 +94,14 @@ def peakDiamonds(data,screen):
 	pxlcount = 48
 	surf = pygame.surfarray.make_surface(resultMatrix)
 	surfa = pygame.transform.scale(surf,(pxlcount,pxlcount))
-	surfb = pygame.transform.rotate(surfa,90)
-	surfc = pygame.transform.rotate(surfa,180)
-	surfd = pygame.transform.rotate(surfa,270)
+	surfb = pygame.transform.flip(surfa,True, False)
+	surfc = pygame.transform.flip(surfa, False ,True)
+	surfd = pygame.transform.flip(surfa,True, True)
+	
 	for idxX in range(0,16,2):
 		for idxY in range(0,16,2):
-			screen.blit(surfb, (pxlcount*idxX, pxlcount*idxY))
-			screen.blit(surfa, (pxlcount*(idxX+1), pxlcount*idxY))
+			screen.blit(surfa, (pxlcount*idxX, pxlcount*idxY))
+			screen.blit(surfb, (pxlcount*(idxX+1), pxlcount*idxY))
 			screen.blit(surfc, (pxlcount*idxX, pxlcount*(idxY+1)))
 			screen.blit(surfd, (pxlcount*(idxX+1), pxlcount*(idxY+1)))
 
@@ -116,18 +109,22 @@ def peakDiamonds(data,screen):
 	#toc()
 def timeSignal(data, screen, color = (0, 255, 255)):
 	downsampled = signal.resample(data, WIDTH)
-	downsampled = downsampled/20
-	count = 0;
-	lastsample = 0;
+	downsampled = downsampled/40
+
+	sampledTuple =[]
+	xoff = 0 
+	xstep = WIDTH/len(downsampled)
+	yoff = HEIGHT/2
 	for sample in downsampled:
-		pygame.draw.rect(screen, color, pygame.Rect(count, HEIGHT/2-lastsample, 1, lastsample-sample))
-		lastsample = sample
-		count = count + 1
-def fftSignal(data, screen):
+		sampledTuple.append((round(xoff),round(yoff-sample)))
+		xoff = xoff + xstep
+
+	pygame.draw.lines(screen,color,False,sampledTuple,5)
+def fftSignal(data, screen, color = (0, 255, 255)):
 	global S_t
 	fft_data = np.absolute(rfft(data))/100
 	downsampled = signal.resample(fft_data, WIDTH)
-	downsampled = downsampled/20
+	downsampled = downsampled/40
 	colorRed = round(sum(fft_data[0:5])/6)*6
 	if colorRed > S_t and colorRed > 10:
 		S_t = colorRed
@@ -135,18 +132,16 @@ def fftSignal(data, screen):
 		S_t = 0.66*S_t
 
 	screen.fill((min(255,S_t),0,0))
-	count = 0;
-	lastsample = 0;
+	sampledTuple =[]
+	xoff = 0 
+	xstep = WIDTH/len(downsampled)
+	yoff = round(HEIGHT * 0.9)
 	for sample in downsampled:
-		if lastsample > sample:
-			bottom = lastsample
-			height = lastsample - sample
-		else:
-			bottom = sample
-			height = sample - lastsample
-		pygame.draw.rect(screen, (0, 255, 255), pygame.Rect(count, HEIGHT-bottom, 1, height))
-		lastsample = sample
-		count = count + 1
+		sampledTuple.append((round(xoff),round(yoff-sample)))
+		xoff = xoff + xstep
+
+	pygame.draw.lines(screen,color,False,sampledTuple,5)
+
 currentDisplay = timeSignal
 displayFunctions = [meanDiamonds,timeSignal,fftSignal,peakDiamonds]
 nextChangeTime = time.time()
