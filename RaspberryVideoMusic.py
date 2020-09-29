@@ -14,14 +14,21 @@ chunk=2205
 RATE=44100
 WIDTH=640
 HEIGHT=480
+time_to_buf_fft = 4 #sec
+signal_pk = 0
+tau = 0.2 #set tau = 0.2 -> 5*tau = 1sec
+numBars = 12
+
+
+#old, weird variables....
 S_t = 0
 peak = 0
 
 
-nextChangeTime = time.time()
-
-
 sampleBuffer = np.zeros(RATE*4)
+fftArray = np.zeros([chunk,int(time_to_buf_fft*RATE/chunk)])
+fftBargraphPeaks = np.zeros(numBars)
+minfft = np.zeros(numBars)-1
 FRAMEREADY = pygame.USEREVENT+1
 
 peakDiamondSize = 10
@@ -64,11 +71,11 @@ def shiftIn(arr1, arr2):
     return result
 
 def shiftIn2DCols(arr1, arr2):
-	l1 = arr1.shape(2)
-	l2 = arr2.shape(2)
+	l1 = arr1.shape[1]
+	l2 = arr2.shape[1]
 	ld = l1-l2
-	result = np.zeros(l1)
-	result[:,:ld] = arr1[l2:]
+	result = np.zeros(arr1.shape)
+	result[:,:ld] = arr1[:,l2:]
 	result[:,ld:] = arr2
 	return result
 
@@ -202,14 +209,26 @@ def peakDiamonds(data,screen):
 
 	timeSignal(data,screen,(0,255,0))
 	#toc()
+def background(data,screen):
+	global signal_pk
+	colorBG = max(min(255,signal_pk)/255,0)
+	colorBG = colorsys.hsv_to_rgb((1-colorBG)*0.16, 0.66, 0.77)
+	colorBG = tuple(round(i * 255) for i in colorBG)
+	screen.fill(colorBG)
+
+def peakLine(screen):
+	global signal_pk
+	pygame.draw.line(screen, (255,0,0), (0,HEIGHT/2-signal_pk), (WIDTH,HEIGHT/2-signal_pk), 3)
 def timeBackground(data, screen, color = (0, 255, 255)):
-	screen.fill((128,0,0))
+	background(data,screen)
 	timeSignal(data, screen, color)
 	
-
+def timeBackgroundPeak(data,screen, color = (0,255,255)):
+	timeBackground(data, screen, color)
+	peakLine(screen)
 def timeSignal(data, screen, color = (0, 255, 255)):
 	downsampled = signal.resample(data, WIDTH)
-	downsampled = downsampled/40
+	downsampled = downsampled
 
 	sampledTuple =[]
 	xoff = 0 
@@ -220,11 +239,9 @@ def timeSignal(data, screen, color = (0, 255, 255)):
 		xoff = xoff + xstep
 
 	pygame.draw.lines(screen,color,False,np.array(sampledTuple).astype(np.int64),5)
+
 def fftBackground(data, screen, color = (0, 255, 255)):
-	global S_t
-	colorBG = colorsys.hsv_to_rgb(max(min(255,128-S_t/100)/255,0), 255/255, 128/255)
-	colorBG = tuple(round(i * 255) for i in colorBG)
-	screen.fill(colorBG)
+	background(data,screen)
 	fftSignal(data, screen, color)
 	
 def array_reshape(input_vector,result_height,result_width,row_stride,row_repeat):
@@ -253,21 +270,57 @@ def spectrogram(data,screen):
 	screen.blit(surf,(0,0))
 
 def barchart(data, screen):
-	return
-def fftSignal(data, screen, color = (0, 255, 255)):
-	global S_t
-	window = signal.hamming(len(data))
-	w_data = data * window
-	fft_data = np.absolute(rfft(w_data))
-	fft_data = 200*np.log10(fft_data)
-	downsampled = signal.resample(fft_data, WIDTH)
-	downsampled = downsampled/4
-	colorRed = round(sum(fft_data[0:5])/6)*6
-	if colorRed > S_t and colorRed > 10:
-		S_t = colorRed
-	else:
-		S_t = 0.5*S_t
+	global numBars, tau, HEIGHT, WIDTH
+	background(data,screen)
+	downsampled = signal.resample(fftArray[:,-1], numBars)
+	downsampled = downsampled * 0.75
+	#compute peaks
+	for channel in range(len(downsampled)):
+		if minfft[channel] == -1:
+			minfft[channel] = downsampled[channel]
+		if minfft[channel] > downsampled[channel]:
+			minfft[channel] = downsampled[channel]
+		downsampled[channel] = downsampled[channel] - minfft[channel]
+		fftBargraphPeaks[channel] = peakDecay(downsampled[channel], fftBargraphPeaks[channel], tau*5)
+	#draw bars
+	barWidth = int(WIDTH/(numBars+4))
+	for xIdx in range(numBars):
+		xPos = (xIdx+1) / (numBars+1) * WIDTH
+		pygame.draw.line(screen, (255,0,255), (xPos,HEIGHT), (xPos,HEIGHT-downsampled[xIdx]), barWidth)
 
+		pygame.draw.line(screen, (0,128,128), (xPos-barWidth/2,HEIGHT-fftBargraphPeaks[xIdx]), (xPos+barWidth/2,HEIGHT-fftBargraphPeaks[xIdx]), 2)
+	return
+# def fftSignal(data, screen, color = (0, 255, 255)):
+# 	global S_t
+# 	window = signal.hamming(len(data))
+# 	w_data = data * window
+# 	fft_data = np.absolute(rfft(w_data))
+# 	fft_data = 200*np.log10(fft_data)
+# 	downsampled = signal.resample(fft_data, WIDTH)
+# 	downsampled = downsampled/4
+# 	colorRed = round(sum(fft_data[0:5])/6)*6
+# 	if colorRed > S_t and colorRed > 10:
+# 		S_t = colorRed
+# 	else:
+# 		S_t = 0.5*S_t
+
+# 	sampledTuple =[]
+# 	xoff = 0 
+# 	xstep = WIDTH/len(downsampled)
+# 	yoff = round(HEIGHT * 0.9)
+
+# 	for sample in downsampled:
+# 		sampledTuple.append((round(xoff),round(yoff-sample)))
+# 		xoff = xoff + xstep
+
+# 	pygame.draw.lines(screen,color,False,np.array(sampledTuple).astype(np.int64),5)
+
+def fftSignal(data, screen, color = (0, 255, 255)):
+	global fftArray
+	
+	downsampled = signal.resample(fftArray[:,-1], WIDTH)
+	downsampled = downsampled/4
+	
 	sampledTuple =[]
 	xoff = 0 
 	xstep = WIDTH/len(downsampled)
@@ -279,28 +332,51 @@ def fftSignal(data, screen, color = (0, 255, 255)):
 
 	pygame.draw.lines(screen,color,False,np.array(sampledTuple).astype(np.int64),5)
 
-#### System Functions
-def updateData(screen): #handle processing functions that do not directly draw to the screen, like computing FFT, peaks, etc.
-	#compute peak amplitude w/ decay
+def peakDecay(val, oldVal, tau):
+	val = np.abs(val)
+	if val > oldVal:
+		return val
+	else:
+		alpha = 1 - np.exp(-(chunk/RATE)/tau)
+		val = alpha * val + (1 - alpha) * oldVal
+		return val
 
+
+def fftwindow(data):
+	window = signal.hamming(len(data))
+	w_data = data * window
+	fft_data = np.absolute(rfft(w_data))
+	fft_data = 200*np.log10(fft_data)
+	return fft_data
+#### System Functions
+def updateData(screen,data,signal_pk): #handle processing functions that do not directly draw to the screen, like computing FFT, peaks, etc.
+	global chunk, tau, fftArray
+	#compute peak amplitude w/ decay
+	newPk = np.amax(data[-chunk:])
+	signal_pk = peakDecay(newPk, signal_pk, tau)
 	#compute fft
 
-	return
+	newFrame1 = np.array(fftwindow(data[-chunk:]))
+	newFrame2 = np.array(fftwindow(data[-int(chunk*3/2):-int(chunk/2)]))
+	newFrame = np.column_stack((newFrame1,newFrame2))
+	fftArray = shiftIn2DCols(fftArray, newFrame)
+	return signal_pk
 
-def updateFrame(screen): #update the screen
-	global nextChangeTime,currentDisplay,displayFunctions,sampleBuffer
+def updateFrame(screen, data, displayFunctions, nextChangeTime, currentDisplay, signal_pk): #update the screen
+	global WIDTH, HEIGHT
 	currentTime = time.time();
 	if(currentTime > nextChangeTime):
 		currentDisplay = random.choice(displayFunctions)
 		nextChangeTime = currentTime + random.randrange(3,7)
 			
 	screen.fill((0,0,0))
-	currentDisplay(sampleBuffer[-5000:], screen)
+	currentDisplay(data[-5000:], screen)
+	return nextChangeTime,currentDisplay
 
 def processBuffer(in_data, frame_count, time_info, status):
 	global sampleBuffer
 	#data=np.fromstring(stream.read(chunk,exception_on_overflow = False),dtype=np.int16)
-	data = np.frombuffer(in_data, dtype=np.int16)
+	data = np.frombuffer(in_data, dtype=np.int16)/40
 	raw_data = data
 	sampleBuffer = shiftIn(sampleBuffer,data)
 	
@@ -310,7 +386,8 @@ def processBuffer(in_data, frame_count, time_info, status):
 	return (raw_data, pyaudio.paContinue)
 
 # define a main function
-def main():
+def main(displayFunctions):
+	global signal_pk, chunk, RATE, WIDTH, HEIGHT
 	# initialize the pygame module
 	disp_no = os.getenv("DISPLAY")
 
@@ -359,14 +436,19 @@ def main():
 	#input stream setup
 	stream=p.open(format = pyaudio.paInt16,rate=RATE,channels=1, input_device_index = 0, input=True, frames_per_buffer=chunk, stream_callback=processBuffer) #on Win7 PC, 1 = Microphone, 2 = stereo mix (enabled in sound control panel)
 
+	#display state initialization:
+	nextChangeTime = time.time()
+	currentDisplay = displayFunctions[0]
+
+
 	# main loop
 	while running:
 		# event handling, gets all event from the event queue
 		for event in pygame.event.get():
 			# only do something if the event is of type QUIT
 			if event.type == FRAMEREADY:
-				updateData(screen)
-				updateFrame(screen)
+				signal_pk = updateData(screen, sampleBuffer, signal_pk)
+				nextChangeTime, currentDisplay = updateFrame(screen, sampleBuffer, displayFunctions, nextChangeTime, currentDisplay, signal_pk)
 				pygame.display.update()
 				pygame.event.clear(FRAMEREADY)
 			if event.type == pygame.QUIT:
@@ -375,9 +457,8 @@ def main():
      
 # run the main function only if this module is executed as the main script
 # (if you import this as a module then nothing is executed)
-currentDisplay = timeSignal
-displayFunctions = [timeSignal,meanFreq,meanDiamonds,timeBackground,fftBackground,peakDiamonds]
 
 if __name__=="__main__":
     # call the main function
-    main()
+    main([timeSignal,meanFreq,meanDiamonds,timeBackground,fftBackground,peakDiamonds,barchart])
+    # main([barchart])
