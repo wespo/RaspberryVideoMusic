@@ -10,15 +10,25 @@ import random
 import colorsys
 import os
 
-chunk=2205
+CHUNK=2205
 RATE=44100
 WIDTH=640
 HEIGHT=480
 time_to_buf_fft = 4 #sec
 signal_pk = 0
-tau = 0.2 #set tau = 0.2 -> 5*tau = 1sec
+
+tau = 0.05 #set tau = 0.2 -> 5*tau = 1sec
 numBars = 12
 
+#AGC gain and peak detect
+max_gain = 1
+min_gain = 0.001
+digitalGain = max_gain
+max_gain_holdoff = 0
+max_gain_holdoff_limit = 100
+min_gain_holdoff = 0
+min_gain_holdoff_limit = 5
+count_target = 1000
 
 #old, weird variables....
 S_t = 0
@@ -26,7 +36,7 @@ peak = 0
 
 
 sampleBuffer = np.zeros(RATE*4)
-fftArray = np.zeros([chunk,int(time_to_buf_fft*RATE/chunk)])
+fftArray = np.zeros([CHUNK,int(time_to_buf_fft*RATE/CHUNK)])
 fftBargraphPeaks = np.zeros(numBars)
 minfft = np.zeros(numBars)-1
 FRAMEREADY = pygame.USEREVENT+1
@@ -82,17 +92,10 @@ def shiftIn2DCols(arr1, arr2):
 #### Signal display functions
 
 def meanDiamonds(data,screen):
-	global peak, peakArray
-	# tic()
-	
-	screen.fill((0,0,0))
-	
-	peak = clamp(pow(2.71,1+sum(abs(data))/len(data)/100),0,255)
-	# print(peak)
-	
+	global signal_pk, peakArray
 
 	meanArray.pop(0)
-	meanArray.append(peak)
+	meanArray.append(signal_pk)
 	
 	resultMatrix = []
 	for offs in range(0,meanDiamondSize):
@@ -114,7 +117,7 @@ def meanDiamonds(data,screen):
 	screen.blit(surfc, (320,240))
 
 	#timeSignal(data,screen,(random.randint(0,255),random.randint(0,255),random.randint(0,255)))
-	timeSignal(data,screen,(0,255,0))
+	# timeSignal(data,screen,(0,255,0))
 	# toc()
 def meanFreq(data,screen):
 	global peak, peakArray
@@ -167,22 +170,13 @@ def meanFreq(data,screen):
 	screen.blit(surfd, (0,240))
 	screen.blit(surfc, (320,240))
 
-	fftSignal(data,screen,(0,255,0))
+	# fftSignal(data,screen,(0,255,0))
 	# toc()
 def peakDiamonds(data,screen):
-	global peak, peakArray
-	#tic()
-	downsampled = signal.resample(data, WIDTH)
-	screen.fill((0,0,0))
-	lastsample = 0;
-	
-	if max(downsampled) > peak:
-		peak = max(downsampled) * 3
-	else:
-		peak = peak * 0.99
+	global signal_pk, peakArray
 
 	peakArray.pop(0)
-	peakArray.append(peak)
+	peakArray.append(signal_pk/10)
 	
 	#resultMatrix = np.array([peakArray.copy()[4:peakArraySize],peakArray.copy()[3:peakArraySize-1],peakArray.copy()[2:peakArraySize-2],peakArray.copy()[1:peakArraySize-3],peakArray.copy()[0:peakArraySize-4]])
 	arrayRows = peakDiamondSize
@@ -207,12 +201,13 @@ def peakDiamonds(data,screen):
 			screen.blit(surfc, (pxlcount*idxX, pxlcount*(idxY+1)))
 			screen.blit(surfd, (pxlcount*(idxX+1), pxlcount*(idxY+1)))
 
-	timeSignal(data,screen,(0,255,0))
+	# timeSignal(data,screen,(0,255,0))
 	#toc()
 def background(data,screen):
-	global signal_pk
-	colorBG = max(min(255,signal_pk)/255,0)
-	colorBG = colorsys.hsv_to_rgb((1-colorBG)*0.16, 0.66, 0.77)
+	global signal_pk,digitalGain
+	colorBG = np.clip(signal_pk/1200,0,1)
+	colorBG = np.clip((1-colorBG)*1.5,0,1)
+	colorBG = colorsys.hsv_to_rgb(0, 0.5*(1-colorBG), 0.77)
 	colorBG = tuple(round(i * 255) for i in colorBG)
 	screen.fill(colorBG)
 
@@ -227,8 +222,9 @@ def timeBackgroundPeak(data,screen, color = (0,255,255)):
 	timeBackground(data, screen, color)
 	peakLine(screen)
 def timeSignal(data, screen, color = (0, 255, 255)):
+	global digitalGain
 	downsampled = signal.resample(data, WIDTH)
-	downsampled = downsampled
+	downsampled = downsampled * digitalGain / 4
 
 	sampledTuple =[]
 	xoff = 0 
@@ -261,26 +257,29 @@ def array_reshape(input_vector,result_height,result_width,row_stride,row_repeat)
 	return resArray
 
 def spectrogram(data,screen):
-	global WIDTH, HEIGHT, sampleBuffer
-	row_px = 4
-	blitArray = np.zeros([WIDTH,HEIGHT,3])
-	resArray = array_reshape(sampleBuffer,HEIGHT,WIDTH,int(WIDTH/2),4)
-	blitArray[:,:,0] = resArray.transpose()
-	surf = pygame.surfarray.make_surface(blitArray)
-	screen.blit(surf,(0,0))
+	global WIDTH, HEIGHT, fftArray
+	specArray = signal.resample (fftArray, 64, axis = 0)
+	blitArray = np.zeros((specArray.shape[0],specArray.shape[1],3))
+	blitArray[:,:,0] = np.clip(specArray/5,0,255)
+	surf = pygame.surfarray.make_surface(np.transpose(blitArray,(1,0,2)))
+	surfa = pygame.transform.scale(surf,(640,480))
+	# surfd = pygame.transform.flip(surfa,True, True)
+
+	screen.blit(surfa, (0,0))
+
 
 def barchart(data, screen):
 	global numBars, tau, HEIGHT, WIDTH
-	background(data,screen)
+	# background(data,screen)
 	downsampled = signal.resample(fftArray[:,-1], numBars)
 	downsampled = downsampled * 0.75
 	#compute peaks
 	for channel in range(len(downsampled)):
 		if minfft[channel] == -1:
-			minfft[channel] = downsampled[channel]
+			minfft[channel] = np.abs(downsampled[channel])
 		if minfft[channel] > downsampled[channel]:
-			minfft[channel] = downsampled[channel]
-		downsampled[channel] = downsampled[channel] - minfft[channel]
+			minfft[channel] = np.abs(downsampled[channel])
+		downsampled[channel] = np.abs(downsampled[channel] - minfft[channel])
 		fftBargraphPeaks[channel] = peakDecay(downsampled[channel], fftBargraphPeaks[channel], tau*5)
 	#draw bars
 	barWidth = int(WIDTH/(numBars+4))
@@ -290,30 +289,6 @@ def barchart(data, screen):
 
 		pygame.draw.line(screen, (0,128,128), (xPos-barWidth/2,HEIGHT-fftBargraphPeaks[xIdx]), (xPos+barWidth/2,HEIGHT-fftBargraphPeaks[xIdx]), 2)
 	return
-# def fftSignal(data, screen, color = (0, 255, 255)):
-# 	global S_t
-# 	window = signal.hamming(len(data))
-# 	w_data = data * window
-# 	fft_data = np.absolute(rfft(w_data))
-# 	fft_data = 200*np.log10(fft_data)
-# 	downsampled = signal.resample(fft_data, WIDTH)
-# 	downsampled = downsampled/4
-# 	colorRed = round(sum(fft_data[0:5])/6)*6
-# 	if colorRed > S_t and colorRed > 10:
-# 		S_t = colorRed
-# 	else:
-# 		S_t = 0.5*S_t
-
-# 	sampledTuple =[]
-# 	xoff = 0 
-# 	xstep = WIDTH/len(downsampled)
-# 	yoff = round(HEIGHT * 0.9)
-
-# 	for sample in downsampled:
-# 		sampledTuple.append((round(xoff),round(yoff-sample)))
-# 		xoff = xoff + xstep
-
-# 	pygame.draw.lines(screen,color,False,np.array(sampledTuple).astype(np.int64),5)
 
 def fftSignal(data, screen, color = (0, 255, 255)):
 	global fftArray
@@ -332,51 +307,80 @@ def fftSignal(data, screen, color = (0, 255, 255)):
 
 	pygame.draw.lines(screen,color,False,np.array(sampledTuple).astype(np.int64),5)
 
+def fftwindow(data):
+	global digitalGain, CHUNK
+	window = signal.hamming(len(data))
+	w_data = data * window
+	fft_data = np.absolute(rfft(w_data))
+	fft_data = 200 * np.log10(fft_data*digitalGain)
+	return fft_data
+#### System Functions
 def peakDecay(val, oldVal, tau):
 	val = np.abs(val)
 	if val > oldVal:
 		return val
 	else:
-		alpha = 1 - np.exp(-(chunk/RATE)/tau)
+		alpha = 1 - np.exp(-(CHUNK/RATE)/tau)
 		val = alpha * val + (1 - alpha) * oldVal
 		return val
+def agc(data,newPk): #AGC gain and peak detect
+	global max_gain, min_gain, digitalGain, max_gain_holdoff, min_gain_holdoff, max_gain_holdoff_limit, min_gain_holdoff_limit, count_target
 
+	if newPk*digitalGain < count_target*0.9:
+		max_gain_holdoff += 1
+		if max_gain_holdoff > max_gain_holdoff_limit:
+			#increase gain
+			digitalGain = digitalGain * 1.05
+			#clamp
+			digitalGain = min(max_gain, digitalGain)
+	else:
+		max_gain_holdoff = 0
+	
+	if newPk*digitalGain > count_target*1.1:
+		min_gain_holdoff += 1
+		if min_gain_holdoff > min_gain_holdoff_limit:
+			#increase gain
+			digitalGain = digitalGain * 0.9
+			#clamp
+			digitalGain = max(min_gain, digitalGain)
+	else:
+		min_gain_holdoff = 0
 
-def fftwindow(data):
-	window = signal.hamming(len(data))
-	w_data = data * window
-	fft_data = np.absolute(rfft(w_data))
-	fft_data = 200*np.log10(fft_data)
-	return fft_data
-#### System Functions
+	return digitalGain
+	
+	# print(newPk*digitalGain,digitalGain)
+
 def updateData(screen,data,signal_pk): #handle processing functions that do not directly draw to the screen, like computing FFT, peaks, etc.
-	global chunk, tau, fftArray
+	global CHUNK, tau, fftArray
 	#compute peak amplitude w/ decay
-	newPk = np.amax(data[-chunk:])
-	signal_pk = peakDecay(newPk, signal_pk, tau)
+	newPk = np.amax(np.abs(data[-CHUNK:]))
+	digitalGain = agc(data,newPk)
+	signal_pk = peakDecay(newPk*digitalGain, signal_pk, tau)
 	#compute fft
 
-	newFrame1 = np.array(fftwindow(data[-chunk:]))
-	newFrame2 = np.array(fftwindow(data[-int(chunk*3/2):-int(chunk/2)]))
+	newFrame1 = np.array(fftwindow(data[-CHUNK:]))
+	newFrame2 = np.array(fftwindow(data[-int(CHUNK*3/2):-int(CHUNK/2)]))
 	newFrame = np.column_stack((newFrame1,newFrame2))
 	fftArray = shiftIn2DCols(fftArray, newFrame)
 	return signal_pk
 
-def updateFrame(screen, data, displayFunctions, nextChangeTime, currentDisplay, signal_pk): #update the screen
+def updateFrame(screen, data, displayFunctions, backgroundFunctions, nextChangeTime, currentDisplay, currentBackground, signal_pk): #update the screen
 	global WIDTH, HEIGHT
 	currentTime = time.time();
 	if(currentTime > nextChangeTime):
 		currentDisplay = random.choice(displayFunctions)
+		currentBackground = random.choice(backgroundFunctions)
 		nextChangeTime = currentTime + random.randrange(3,7)
 			
 	screen.fill((0,0,0))
+	currentBackground(data[-5000:], screen)
 	currentDisplay(data[-5000:], screen)
-	return nextChangeTime,currentDisplay
+	return nextChangeTime,currentDisplay, currentBackground
 
 def processBuffer(in_data, frame_count, time_info, status):
 	global sampleBuffer
-	#data=np.fromstring(stream.read(chunk,exception_on_overflow = False),dtype=np.int16)
-	data = np.frombuffer(in_data, dtype=np.int16)/40
+	#data=np.fromstring(stream.read(CHUNK,exception_on_overflow = False),dtype=np.int16)
+	data = np.frombuffer(in_data, dtype=np.int16)
 	raw_data = data
 	sampleBuffer = shiftIn(sampleBuffer,data)
 	
@@ -386,8 +390,8 @@ def processBuffer(in_data, frame_count, time_info, status):
 	return (raw_data, pyaudio.paContinue)
 
 # define a main function
-def main(displayFunctions):
-	global signal_pk, chunk, RATE, WIDTH, HEIGHT
+def main(displayFunctions,backgroundFunctions):
+	global signal_pk, CHUNK, RATE, WIDTH, HEIGHT
 	# initialize the pygame module
 	disp_no = os.getenv("DISPLAY")
 
@@ -434,11 +438,12 @@ def main(displayFunctions):
 	p=pyaudio.PyAudio()
 	
 	#input stream setup
-	stream=p.open(format = pyaudio.paInt16,rate=RATE,channels=1, input_device_index = 0, input=True, frames_per_buffer=chunk, stream_callback=processBuffer) #on Win7 PC, 1 = Microphone, 2 = stereo mix (enabled in sound control panel)
+	stream=p.open(format = pyaudio.paInt16,rate=RATE,channels=1, input_device_index = 0, input=True, frames_per_buffer=CHUNK, stream_callback=processBuffer) #on Win7 PC, 1 = Microphone, 2 = stereo mix (enabled in sound control panel)
 
 	#display state initialization:
 	nextChangeTime = time.time()
 	currentDisplay = displayFunctions[0]
+	currentBackground = backgroundFunctions[0]
 
 
 	# main loop
@@ -448,7 +453,7 @@ def main(displayFunctions):
 			# only do something if the event is of type QUIT
 			if event.type == FRAMEREADY:
 				signal_pk = updateData(screen, sampleBuffer, signal_pk)
-				nextChangeTime, currentDisplay = updateFrame(screen, sampleBuffer, displayFunctions, nextChangeTime, currentDisplay, signal_pk)
+				nextChangeTime, currentDisplay, currentBackground = updateFrame(screen, sampleBuffer, displayFunctions, backgroundFunctions, nextChangeTime, currentDisplay, currentBackground, signal_pk)
 				pygame.display.update()
 				pygame.event.clear(FRAMEREADY)
 			if event.type == pygame.QUIT:
@@ -460,5 +465,5 @@ def main(displayFunctions):
 
 if __name__=="__main__":
     # call the main function
-    main([timeSignal,meanFreq,meanDiamonds,timeBackground,fftBackground,peakDiamonds,barchart])
-    # main([barchart])
+    # main([timeSignal,meanFreq,meanDiamonds,timeBackground,fftBackground,peakDiamonds,barchart,spectrogram])
+    main([timeSignal,fftSignal,barchart],[peakDiamonds, meanDiamonds, spectrogram, background])
