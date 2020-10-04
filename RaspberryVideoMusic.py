@@ -9,11 +9,14 @@ import time
 import random
 import colorsys
 import os
-
+import argparse
+import setproctitle
 
 #old, weird variables....
 S_t = 0
 peak = 0
+
+setproctitle.setproctitle("PiVideoMusic")
 
 FRAMEREADY = pygame.USEREVENT+1
 
@@ -76,14 +79,14 @@ def peakDecay(val, oldVal, tau, CHUNK, RATE):
 		val = alpha * val + (1 - alpha) * oldVal
 		return val
 class piVideoMusic:
-	def __init__(self,displayFunctions=None,backgroundFunctions=None):
+	def __init__(self,displayFunctions=None,backgroundFunctions=None,listFlag=False,videoInterface=0,audioInterface=0):
 		self.CHUNK=2205
 		self.RATE=44100
 		self.WIDTH=640
 		self.HEIGHT=480
 		self.time_to_buf_fft = 4 #sec
 		self.signal_pk = 0
-
+		self.colorlist = range(0,256,32)
 		self.tau = 0.05 #set tau = 0.2 -> 5*tau = 1sec
 		self.numBars = 12
 
@@ -157,8 +160,18 @@ class piVideoMusic:
 		#audio handle
 		p=pyaudio.PyAudio()
 		
+		audioInterfaceString = "{:2}\t{:40}\t{:8}\t{:9}\t{:11}\t{:3}"
+		if listFlag:
+			print(audioInterfaceString.format("ID","Name","Input Ch", "Output Ch", "Sample Rate", "Sel"))
+			for i in range(p.get_device_count()):
+				if i == audioInterface:
+					marker = "<--"
+				else:
+					marker = ""
+				interfaceInfo = p.get_device_info_by_index(i)
+				print(audioInterfaceString.format(interfaceInfo['index'],interfaceInfo['name'],interfaceInfo['maxInputChannels'],interfaceInfo['maxOutputChannels'],interfaceInfo['defaultSampleRate'],marker))
 		#input stream setup
-		self.stream=p.open(format = pyaudio.paInt16,rate=self.RATE,channels=1, input_device_index = 0, input=True, frames_per_buffer=self.CHUNK, stream_callback=self.processBuffer) #on Win7 PC, 1 = Microphone, 2 = stereo mix (enabled in sound control panel)
+		self.stream=p.open(format = pyaudio.paInt16,rate=self.RATE,channels=1, input_device_index = audioInterface, input=True, frames_per_buffer=self.CHUNK, stream_callback=self.processBuffer) #on Win7 PC, 1 = Microphone, 2 = stereo mix (enabled in sound control panel)
 
 		#display state initialization:
 		self.nextChangeTime = time.time()
@@ -251,7 +264,8 @@ def meanDiamonds(self,data,screen):
 		self.persistantDisplayData['meanDiamondSize'] = 64 #was 16 before
 		self.persistantDisplayData['meanArraySize'] = (2*self.persistantDisplayData['meanDiamondSize']-1)
 		self.persistantDisplayData['meanArray'] = [0] * self.persistantDisplayData['meanArraySize'] #np.zeros((1,2*peakDiamondSize-1))
-
+	if not 'colorTuple' in self.currentDisplayData:
+		self.currentDisplayData['colorTuple'] = (random.choice(self.colorlist)/255,random.choice(self.colorlist)/255,random.choice(self.colorlist)/255)
 	self.persistantDisplayData['meanArray'].pop(0)
 	self.persistantDisplayData['meanArray'].append(self.signal_pk)
 	
@@ -261,7 +275,9 @@ def meanDiamonds(self,data,screen):
 	
 	resArray = np.asarray(resultMatrix)
 	zerArray = np.zeros(resArray.shape+(3,))
-	zerArray[:,:,2] = resArray
+	zerArray[:,:,0] = resArray*self.currentDisplayData['colorTuple'][0]
+	zerArray[:,:,1] = resArray*self.currentDisplayData['colorTuple'][1]
+	zerArray[:,:,2] = resArray*self.currentDisplayData['colorTuple'][2]
 
 	surf = pygame.surfarray.make_surface(zerArray)
 	surfa = pygame.transform.scale(surf,(320,240))
@@ -278,9 +294,6 @@ def meanDiamonds(self,data,screen):
 	# timeSignal(data,screen,(0,255,0))
 	# toc()
 def meanFreq(self,data,screen): #needs tuning
-	global peak, peakArray
-	# tic()
-	
 	if not 'freqArrayr' in self.persistantDisplayData:
 		self.persistantDisplayData['freqDiamondSize'] = 40 #was 16 before
 		self.persistantDisplayData['freqArraySize'] = (2*self.persistantDisplayData['freqDiamondSize']-1)
@@ -382,7 +395,11 @@ def background(self, data, screen):
 def peakLine(self, data, screen):
 	pygame.draw.line(screen, (255,0,0), (0,self.HEIGHT/2-self.signal_pk), (self.WIDTH,self.HEIGHT/2-signal_pk), 3)
 
-def timeSignal(self, data, screen, color = (0, 255, 255)):
+def timeSignal(self, data, screen, color = None):
+	if not 'FGcolorTuple' in self.currentDisplayData:
+		self.currentDisplayData['FGcolorTuple'] = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+	if color == None:
+		color = self.currentDisplayData['FGcolorTuple']
 	downsampled = signal.resample(data, self.WIDTH)
 	downsampled = downsampled * self.digitalGain / 4
 
@@ -399,9 +416,15 @@ def timeSignal(self, data, screen, color = (0, 255, 255)):
 
 
 def spectrogram(self,data,screen):
+	if not 'colorTuple' in self.currentDisplayData:
+		self.currentDisplayData['colorTuple'] = (random.choice(self.colorlist)/255,random.choice(self.colorlist)/255,random.choice(self.colorlist)/255)
 	specArray = signal.resample (self.fftArray, 64, axis = 0)
 	blitArray = np.zeros((specArray.shape[0],specArray.shape[1],3))
-	blitArray[:,:,0] = np.clip(specArray/5,0,255)
+	specRes = np.clip(specArray/5,0,255)
+	blitArray[:,:,0] = specRes * self.currentDisplayData['colorTuple'][0]
+	blitArray[:,:,1] = specRes * self.currentDisplayData['colorTuple'][1]
+	blitArray[:,:,2] = specRes * self.currentDisplayData['colorTuple'][2]
+
 	surf = pygame.surfarray.make_surface(np.transpose(blitArray,(1,0,2)))
 	surfa = pygame.transform.scale(surf,(640,480))
 	# surfd = pygame.transform.flip(surfa,True, True)
@@ -413,7 +436,9 @@ def barchart(self, data, screen):
 	# background(data,screen)
 	if not 'minfft' in self.currentDisplayData:
 		self.currentDisplayData['minfft'] = np.zeros(self.numBars)-1
-		self.persistantDisplayData['fftBargraphPeaks'] = np.zeros(self.numBars)
+		self.currentDisplayData['fftBargraphPeaks'] = np.zeros(self.numBars)
+		self.currentDisplayData['barchartColor'] = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+		self.currentDisplayData['barchartPeakColor'] = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
 
 	downsampled = signal.resample(self.fftArray[:,-1], self.numBars)
 	downsampled = downsampled * 0.75
@@ -424,17 +449,21 @@ def barchart(self, data, screen):
 		if self.currentDisplayData['minfft'][channel] > downsampled[channel]:
 			self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
 		downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['minfft'][channel])
-		self.persistantDisplayData['fftBargraphPeaks'][channel] = peakDecay(downsampled[channel], self.persistantDisplayData['fftBargraphPeaks'][channel], self.tau*5, self.CHUNK, self.RATE)
+		self.currentDisplayData['fftBargraphPeaks'][channel] = peakDecay(downsampled[channel], self.currentDisplayData['fftBargraphPeaks'][channel], self.tau*5, self.CHUNK, self.RATE)
 	#draw bars
 	barWidth = int(self.WIDTH/(self.numBars+4))
 	for xIdx in range(self.numBars):
 		xPos = (xIdx+1) / (self.numBars+1) * self.WIDTH
-		pygame.draw.line(screen, (255,0,255), (xPos,self.HEIGHT), (xPos,self.HEIGHT-downsampled[xIdx]), barWidth)
+		pygame.draw.line(screen, self.currentDisplayData['barchartColor'], (xPos,self.HEIGHT), (xPos,self.HEIGHT-downsampled[xIdx]), barWidth)
 
-		pygame.draw.line(screen, (0,128,128), (xPos-barWidth/2,self.HEIGHT-self.persistantDisplayData['fftBargraphPeaks'][xIdx]), (xPos+barWidth/2,self.HEIGHT-self.persistantDisplayData['fftBargraphPeaks'][xIdx]), 2)
+		pygame.draw.line(screen, self.currentDisplayData['barchartPeakColor'], (xPos-barWidth/2,self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx]), (xPos+barWidth/2,self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx]), 2)
 	return
 
-def fftSignal(self, data, screen, color = (0, 255, 255)):
+def fftSignal(self, data, screen, color = None):
+	if not 'FGcolorTuple' in self.currentDisplayData:
+		self.currentDisplayData['FGcolorTuple'] = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+	if color == None:
+		color = self.currentDisplayData['FGcolorTuple']
 	downsampled = signal.resample(self.fftArray[:,-1], self.WIDTH)
 	downsampled = downsampled/4
 	
@@ -455,6 +484,15 @@ def fftSignal(self, data, screen, color = (0, 255, 255)):
 if __name__=="__main__":
     # call the main function
     # main([timeSignal,meanFreq,meanDiamonds,timeBackground,fftBackground,peakDiamonds,barchart,spectrogram])
-    PVM = piVideoMusic([timeSignal, fftSignal, barchart],[spectrogram,background,peakDiamonds,meanDiamonds]) #
-    while PVM.running:
-    	PVM.processEvent()
+    
+	parser = argparse.ArgumentParser(description='Raspberry Pi Video Music. Inspired by the Atari Video Music system.')
+	parser.add_argument('-l', action="store_true", help="list audio and video interfaces")
+	parser.add_argument('-v', action="store", type=int, default = 0, help="Specify video interface (int)")
+	parser.add_argument('-a', action="store", type=int, default = 0, help="Specify audio interface (int)")
+	args = parser.parse_args()
+
+	args = parser.parse_args()
+
+	PVM = piVideoMusic([timeSignal, fftSignal, barchart],[spectrogram,background,peakDiamonds,meanDiamonds],listFlag=args.l,videoInterface=args.v,audioInterface=args.a) #
+	while PVM.running:
+		PVM.processEvent()
