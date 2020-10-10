@@ -35,7 +35,8 @@ def toc():
 	global tStart
 	print("Frame Time:" + str(round(1000*(time.time()-tStart))))
 
-
+def ListDiff(list1, list2): 
+    return (list(list(set(list1)-set(list2)) + list(set(list2)-set(list1)))) 
 #### Signal Support functions
 # shift arr2 into the end of arr1, dropping len(arr2) samples at the start of arr1
 def shiftIn(arr1, arr2):
@@ -79,7 +80,7 @@ def peakDecay(val, oldVal, tau, CHUNK, RATE):
 		val = alpha * val + (1 - alpha) * oldVal
 		return val
 class piVideoMusic:
-	def __init__(self,displayFunctions=None,backgroundFunctions=None,listFlag=False,videoInterface=0,audioInterface=0):
+	def __init__(self,displayFunctions=None,backgroundFunctions=None,listFlag=False,videoInterface=0,audioInterface=0,fullscreen=True):
 		self.CHUNK=2205
 		self.RATE=44100
 		self.WIDTH=640
@@ -104,7 +105,8 @@ class piVideoMusic:
 		self.fftArray = np.zeros([self.CHUNK,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
 
 		self.persistantDisplayData={}
-		self.currentDisplayData={}
+		self.currentDisplayData=self.refreshCurrentDisplay()
+		
 
 		if displayFunctions == None:
 			self.displayFunctions = [display_none]
@@ -115,36 +117,39 @@ class piVideoMusic:
 		else:
 			self.backgroundFunctions = backgroundFunctions
 
-		# initialize the pygame module
-		disp_no = os.getenv("DISPLAY")
+		if fullscreen == True:
+			# initialize the pygame module
+			disp_no = os.getenv("DISPLAY")
 
-		# Check which frame buffer drivers are available
-		# Start with fbcon since directfb hangs with composite output
-		drivers = ['fbcon', 'directfb', 'svgalib']
-		found = False
-		for driver in drivers:
-			# Make sure that SDL_VIDEODRIVER is set
-			if not os.getenv('SDL_VIDEODRIVER'):
-				os.putenv('SDL_VIDEODRIVER', driver)
-			try:
-				pygame.display.init()
-			except pygame.error:
-				print('Driver: {0} failed.'.format(driver))
-				continue
-			found = True
-			break
+			# Check which frame buffer drivers are available
+			# Start with fbcon since directfb hangs with composite output
+			drivers = ['fbcon', 'directfb', 'svgalib']
+			found = False
+			for driver in drivers:
+				# Make sure that SDL_VIDEODRIVER is set
+				if not os.getenv('SDL_VIDEODRIVER'):
+					os.putenv('SDL_VIDEODRIVER', driver)
+				try:
+					pygame.display.init()
+				except pygame.error:
+					print('Driver: {0} failed.'.format(driver))
+					continue
+				found = True
+				break
 
-		if not found:
-		    raise Exception('No suitable video driver found!')
-		size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
-		flags = pygame.DOUBLEBUF | pygame.HWSURFACE | pygame.FULLSCREEN
-		self.screen = pygame.display.set_mode(size, flags)
-		surface = pygame.Surface((640,480),pygame.FULLSCREEN)
-		pygame.display.set_mode((640,480),pygame.FULLSCREEN)
-		pySurface = surface.convert()
-		# Initialise font support
-		pygame.font.init()
-		pygame.init()
+			if not found:
+			    raise Exception('No suitable video driver found!')
+			size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
+			flags = pygame.DOUBLEBUF | pygame.HWSURFACE | pygame.FULLSCREEN
+			self.screen = pygame.display.set_mode(size, flags)
+			surface = pygame.Surface((640,480),pygame.FULLSCREEN)
+			pygame.display.set_mode((640,480),pygame.FULLSCREEN)
+			pySurface = surface.convert()
+			# Initialise font support
+			pygame.font.init()
+			pygame.init()
+		else:
+			self.screen = pygame.display.set_mode((self.WIDTH,self.HEIGHT))
 		# load and set the logo
 		# logo = pygame.image.load("logo32x32.png")
 		# pygame.display.set_icon(logo)
@@ -177,7 +182,34 @@ class piVideoMusic:
 		self.nextChangeTime = time.time()
 		self.currentDisplay = self.displayFunctions[0]
 		self.currentBackground = self.backgroundFunctions[0]
+	def generateColorTuples(self):
+		fg1 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+		fg2 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+		bg1 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+		bg2 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+		
+		if len([fg1,fg2,bg1,bg2]) == len(set([fg1,fg2,bg1,bg2])):
+			fg1 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+			fg2 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+			bg1 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
+			bg2 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
 
+		if bg1 == (0,0,0):
+			bg1[random.choice([0,1,2])] = random.choice(self.colorlist[1:])
+		if bg2 == (0,0,0):
+			bg2[random.choice([0,1,2])] = random.choice(self.colorlist[1:])
+
+
+		# print(colorsys.rgb_to_hsv(fg1[0]/255,fg1[1]/255,fg1[2]/255),colorsys.rgb_to_hsv(fg2[0]/255,fg2[1]/255,fg2[2]/255),colorsys.rgb_to_hsv(bg1[0]/255,bg1[1]/255,bg1[2]/255),colorsys.rgb_to_hsv(bg2[0]/255,bg2[1]/255,bg2[2]/255))
+
+		#ensure that 
+
+		return fg1, fg2, bg1, bg2
+	def refreshCurrentDisplay(self):
+		newData = {}
+		newData['FGcolorTuple'], newData['FGcolorTuple2'], newData['BGcolorTuple1'], newData['BGcolorTuple2'] = self.generateColorTuples()
+		# self.currentDisplayData = newData
+		return newData
 	def processEvent(self):
 		for event in pygame.event.get():
 			# only do something if the event is of type QUIT
@@ -236,10 +268,10 @@ class piVideoMusic:
 	def updateFrame(self,screen, data, displayFunctions, backgroundFunctions, nextChangeTime, currentDisplay, currentDisplayData, currentBackground, signal_pk): #update the screen
 		currentTime = time.time();
 		if(currentTime > nextChangeTime):
-			currentDisplay = random.choice(displayFunctions)
-			currentBackground = random.choice(backgroundFunctions)
+			currentDisplay = random.choice(ListDiff(displayFunctions,[currentDisplay])) #don't hop to the same display
+			currentBackground = random.choice(ListDiff(backgroundFunctions,[currentBackground])) #don't hop to the same display
 			nextChangeTime = currentTime + random.randrange(3,7)
-			currentDisplayData={}
+			currentDisplayData=self.refreshCurrentDisplay()
 				
 		screen.fill((0,0,0))
 		currentBackground(self,data[-5000:], screen)
@@ -264,8 +296,6 @@ def meanDiamonds(self,data,screen):
 		self.persistantDisplayData['meanDiamondSize'] = 64 #was 16 before
 		self.persistantDisplayData['meanArraySize'] = (2*self.persistantDisplayData['meanDiamondSize']-1)
 		self.persistantDisplayData['meanArray'] = [0] * self.persistantDisplayData['meanArraySize'] #np.zeros((1,2*peakDiamondSize-1))
-	if not 'colorTuple' in self.currentDisplayData:
-		self.currentDisplayData['colorTuple'] = (random.choice(self.colorlist)/255,random.choice(self.colorlist)/255,random.choice(self.colorlist)/255)
 	self.persistantDisplayData['meanArray'].pop(0)
 	self.persistantDisplayData['meanArray'].append(self.signal_pk)
 	
@@ -275,9 +305,10 @@ def meanDiamonds(self,data,screen):
 	
 	resArray = np.asarray(resultMatrix)
 	zerArray = np.zeros(resArray.shape+(3,))
-	zerArray[:,:,0] = resArray*self.currentDisplayData['colorTuple'][0]
-	zerArray[:,:,1] = resArray*self.currentDisplayData['colorTuple'][1]
-	zerArray[:,:,2] = resArray*self.currentDisplayData['colorTuple'][2]
+	tempColorTuple = (self.currentDisplayData['BGcolorTuple1'][0]/255,self.currentDisplayData['BGcolorTuple1'][1]/255,self.currentDisplayData['BGcolorTuple1'][2]/255)
+	zerArray[:,:,0] = resArray*tempColorTuple[0]
+	zerArray[:,:,1] = resArray*tempColorTuple[1]
+	zerArray[:,:,2] = resArray*tempColorTuple[2]
 
 	surf = pygame.surfarray.make_surface(zerArray)
 	surfa = pygame.transform.scale(surf,(320,240))
@@ -386,9 +417,11 @@ def peakDiamonds(self, data,screen):
 	#toc()
 gl_count = 0
 def background(self, data, screen):
+	if not 'backgroundFunctionColor' in self.currentDisplayData:
+		self.currentDisplayData['backgroundFunctionColor'] = colorsys.rgb_to_hsv(self.currentDisplayData['BGcolorTuple1'][0]/255,self.currentDisplayData['BGcolorTuple1'][1]/255,self.currentDisplayData['BGcolorTuple1'][2]/255)[0]
 	colorBG = np.clip(self.signal_pk/1200,0,1)
 	colorBG = np.clip((1-colorBG)*1.5,0,1)
-	colorBG = colorsys.hsv_to_rgb(0, 0.5*(1-colorBG), 0.77)
+	colorBG = colorsys.hsv_to_rgb(self.currentDisplayData['backgroundFunctionColor'], 0.5*(1-colorBG), 0.77)
 	colorBG = tuple(round(i * 255) for i in colorBG)
 	screen.fill(colorBG)
 
@@ -396,8 +429,6 @@ def peakLine(self, data, screen):
 	pygame.draw.line(screen, (255,0,0), (0,self.HEIGHT/2-self.signal_pk), (self.WIDTH,self.HEIGHT/2-signal_pk), 3)
 
 def timeSignal(self, data, screen, color = None):
-	if not 'FGcolorTuple' in self.currentDisplayData:
-		self.currentDisplayData['FGcolorTuple'] = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
 	if color == None:
 		color = self.currentDisplayData['FGcolorTuple']
 	downsampled = signal.resample(data, self.WIDTH)
@@ -416,14 +447,12 @@ def timeSignal(self, data, screen, color = None):
 
 
 def spectrogram(self,data,screen):
-	if not 'colorTuple' in self.currentDisplayData:
-		self.currentDisplayData['colorTuple'] = (random.choice(self.colorlist)/255,random.choice(self.colorlist)/255,random.choice(self.colorlist)/255)
 	specArray = signal.resample (self.fftArray, 64, axis = 0)
 	blitArray = np.zeros((specArray.shape[0],specArray.shape[1],3))
 	specRes = np.clip(specArray/5,0,255)
-	blitArray[:,:,0] = specRes * self.currentDisplayData['colorTuple'][0]
-	blitArray[:,:,1] = specRes * self.currentDisplayData['colorTuple'][1]
-	blitArray[:,:,2] = specRes * self.currentDisplayData['colorTuple'][2]
+	blitArray[:,:,0] = specRes * self.currentDisplayData['BGcolorTuple1'][0]/255
+	blitArray[:,:,1] = specRes * self.currentDisplayData['BGcolorTuple1'][1]/255
+	blitArray[:,:,2] = specRes * self.currentDisplayData['BGcolorTuple1'][2]/255
 
 	surf = pygame.surfarray.make_surface(np.transpose(blitArray,(1,0,2)))
 	surfa = pygame.transform.scale(surf,(640,480))
@@ -437,8 +466,6 @@ def barchart(self, data, screen):
 	if not 'minfft' in self.currentDisplayData:
 		self.currentDisplayData['minfft'] = np.zeros(self.numBars)-1
 		self.currentDisplayData['fftBargraphPeaks'] = np.zeros(self.numBars)
-		self.currentDisplayData['barchartColor'] = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
-		self.currentDisplayData['barchartPeakColor'] = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
 
 	downsampled = signal.resample(self.fftArray[:,-1], self.numBars)
 	downsampled = downsampled * 0.75
@@ -453,15 +480,12 @@ def barchart(self, data, screen):
 	#draw bars
 	barWidth = int(self.WIDTH/(self.numBars+4))
 	for xIdx in range(self.numBars):
-		xPos = (xIdx+1) / (self.numBars+1) * self.WIDTH
-		pygame.draw.line(screen, self.currentDisplayData['barchartColor'], (xPos,self.HEIGHT), (xPos,self.HEIGHT-downsampled[xIdx]), barWidth)
-
-		pygame.draw.line(screen, self.currentDisplayData['barchartPeakColor'], (xPos-barWidth/2,self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx]), (xPos+barWidth/2,self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx]), 2)
+		xPos = int((xIdx+1) / (self.numBars+1) * self.WIDTH)
+		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple'], (xPos,self.HEIGHT), (int(xPos),int(self.HEIGHT-downsampled[xIdx])), barWidth)
+		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple2'], (int(xPos-barWidth/2),int(self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx])), (int(xPos+barWidth/2),int(self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx])), 2)
 	return
 
 def fftSignal(self, data, screen, color = None):
-	if not 'FGcolorTuple' in self.currentDisplayData:
-		self.currentDisplayData['FGcolorTuple'] = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
 	if color == None:
 		color = self.currentDisplayData['FGcolorTuple']
 	downsampled = signal.resample(self.fftArray[:,-1], self.WIDTH)
@@ -489,10 +513,9 @@ if __name__=="__main__":
 	parser.add_argument('-l', action="store_true", help="list audio and video interfaces")
 	parser.add_argument('-v', action="store", type=int, default = 0, help="Specify video interface (int)")
 	parser.add_argument('-a', action="store", type=int, default = 0, help="Specify audio interface (int)")
+	parser.add_argument('-w', action="store_false", help="windowed mode")
 	args = parser.parse_args()
 
-	args = parser.parse_args()
-
-	PVM = piVideoMusic([timeSignal, fftSignal, barchart],[spectrogram,background,peakDiamonds,meanDiamonds],listFlag=args.l,videoInterface=args.v,audioInterface=args.a) #
+	PVM = piVideoMusic([timeSignal, fftSignal, barchart],[spectrogram,background,peakDiamonds,meanDiamonds],listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w) #
 	while PVM.running:
 		PVM.processEvent()
