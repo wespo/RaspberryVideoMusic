@@ -268,8 +268,12 @@ class piVideoMusic:
 	def updateFrame(self,screen, data, displayFunctions, backgroundFunctions, nextChangeTime, currentDisplay, currentDisplayData, currentBackground, signal_pk): #update the screen
 		currentTime = time.time();
 		if(currentTime > nextChangeTime):
-			currentDisplay = random.choice(ListDiff(displayFunctions,[currentDisplay])) #don't hop to the same display
-			currentBackground = random.choice(ListDiff(backgroundFunctions,[currentBackground])) #don't hop to the same display
+			newFG = ListDiff(displayFunctions,[currentDisplay])
+			newBG = ListDiff(backgroundFunctions,[currentBackground])
+			if newFG:
+				currentDisplay = random.choice(newFG) #don't hop to the same display
+			if newBG:
+				currentBackground = random.choice(newBG) #don't hop to the same display
 			nextChangeTime = currentTime + random.randrange(3,7)
 			currentDisplayData=self.refreshCurrentDisplay()
 				
@@ -419,9 +423,9 @@ gl_count = 0
 def background(self, data, screen):
 	if not 'backgroundFunctionColor' in self.currentDisplayData:
 		self.currentDisplayData['backgroundFunctionColor'] = colorsys.rgb_to_hsv(self.currentDisplayData['BGcolorTuple1'][0]/255,self.currentDisplayData['BGcolorTuple1'][1]/255,self.currentDisplayData['BGcolorTuple1'][2]/255)[0]
-	colorBG = np.clip(self.signal_pk/1200,0,1)
+	colorBG = np.clip(self.signal_pk/1600,0,1)
 	colorBG = np.clip((1-colorBG)*1.5,0,1)
-	colorBG = colorsys.hsv_to_rgb(self.currentDisplayData['backgroundFunctionColor'], 0.5*(1-colorBG), 0.77)
+	colorBG = colorsys.hsv_to_rgb(self.currentDisplayData['backgroundFunctionColor'], 1, 0.4*(1-colorBG)+0.6)
 	colorBG = tuple(round(i * 255) for i in colorBG)
 	screen.fill(colorBG)
 
@@ -471,9 +475,9 @@ def barchart(self, data, screen):
 	downsampled = downsampled * 0.75
 	#compute peaks
 	for channel in range(len(downsampled)):
-		if self.currentDisplayData['minfft'][channel] == -1:
+		if self.currentDisplayData['minfft'][channel] == -1: #check if minfft is initialized.
 			self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
-		if self.currentDisplayData['minfft'][channel] > downsampled[channel]:
+		if self.currentDisplayData['minfft'][channel] > downsampled[channel]: #if the new sample is less than the minimum, update the minimum.
 			self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
 		downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['minfft'][channel])
 		self.currentDisplayData['fftBargraphPeaks'][channel] = peakDecay(downsampled[channel], self.currentDisplayData['fftBargraphPeaks'][channel], self.tau*5, self.CHUNK, self.RATE)
@@ -485,6 +489,8 @@ def barchart(self, data, screen):
 		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple2'], (int(xPos-barWidth/2),int(self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx])), (int(xPos+barWidth/2),int(self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx])), 2)
 	return
 
+def fftwaterfall(self, data, screen):
+	color = self.currentDisplayData['FGcolorTuple']
 def fftSignal(self, data, screen, color = None):
 	if color == None:
 		color = self.currentDisplayData['FGcolorTuple']
@@ -515,7 +521,8 @@ if __name__=="__main__":
 	parser.add_argument('-a', action="store", type=int, default = 0, help="Specify audio interface (int)")
 	parser.add_argument('-w', action="store_false", help="windowed mode")
 	args = parser.parse_args()
-
-	PVM = piVideoMusic([timeSignal, fftSignal, barchart],[spectrogram,background,peakDiamonds,meanDiamonds],listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w) #
+	bgs = [spectrogram,background,peakDiamonds,meanDiamonds]
+	fgs = [timeSignal, fftSignal, barchart]
+	PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w) #
 	while PVM.running:
 		PVM.processEvent()
