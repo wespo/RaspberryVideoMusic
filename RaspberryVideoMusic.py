@@ -527,24 +527,10 @@ def fftWaterfall(self, data, screen):
 		sampledTuple = fftline(np.array(self.fftArray[:,zoff])/2, self.WIDTH,xoff,yoff,100)
 		pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),5)
 
+#faster version, but has issues with initialization
 def bargraphHill(self, data, screen):
-	if not 'minfft' in self.currentDisplayData:
-		self.currentDisplayData['minfft'] = np.zeros(self.numBars)-1
-		self.currentDisplayData['fftBargraphPeaks'] = np.zeros(self.numBars)
-
 	color = self.currentDisplayData['FGcolorTuple']
 	nrows = 15
-
-	x_max = self.WIDTH/5
-	y_max = self.HEIGHT
-	x_stride = x_max/nrows
-	y_stride = y_max/nrows
-	z_stride = 4
-
-	x_start = x_max
-	# y_start = c
-	z_start = 0
-	
 	if not 'bargrahpHill_a' in self.persistantDisplayData:
 		c1 = (0,self.HEIGHT/4)
 		c2 = (nrows/3,self.HEIGHT/2)
@@ -559,26 +545,49 @@ def bargraphHill(self, data, screen):
 		self.persistantDisplayData['bargrahpHill_a'] = a
 		self.persistantDisplayData['bargrahpHill_b'] = b
 		self.persistantDisplayData['bargrahpHill_c'] = c
-	
+		self.persistantDisplayData['bargrahpHill_xoff'] = np.zeros(nrows)
+		self.persistantDisplayData['bargrahpHill_yoff'] = np.zeros(nrows)
+		x_max = self.WIDTH/5
+		y_max = self.HEIGHT
+		x_stride = x_max/nrows
+		y_stride = y_max/nrows
+		z_stride = 4
 
-	for row in range(0,nrows-1):
-		xoff = x_max - x_stride * row - 30
-		yoff = y_max - (self.persistantDisplayData['bargrahpHill_a'] * (row ** 2) + self.persistantDisplayData['bargrahpHill_b'] * row + self.persistantDisplayData['bargrahpHill_c']) #y_start - y_step_shrink * row * row - y_stride * row
-		# yoff = y_start/2  np.abs(y_start/2 - y_stride * row)
-		zoff = -(row+1)
+		x_start = x_max
+		z_start = 0
 
-		downsampled = signal.resample(self.fftArray[:,zoff], self.numBars)
+		for row in range(0,nrows-1):
+			self.persistantDisplayData['bargrahpHill_xoff'][row] = x_max - x_stride * row - 30
+			self.persistantDisplayData['bargrahpHill_yoff'][row] = y_max - (self.persistantDisplayData['bargrahpHill_a'] * (row ** 2) + self.persistantDisplayData['bargrahpHill_b'] * row + self.persistantDisplayData['bargrahpHill_c']) #y_start - y_step_shrink * row * row - y_stride * row
+	if not 'bargrahpHill_downsampled' in self.currentDisplayData:
+		self.currentDisplayData['bargrahpHill_downsampled'] = np.zeros((nrows,self.numBars))
+		self.currentDisplayData['minfft'] = np.zeros((self.numBars))-1
+		for row in range(0,nrows-1):
+			zoff = -(row+1)
+			downsampled = signal.resample(self.fftArray[:,zoff], self.numBars)
+			downsampled = downsampled * 0.75
+			#compute peaks
+			for channel in range(len(downsampled)):
+				if self.currentDisplayData['minfft'][channel] == -1: #check if minfft is initialized.
+					self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
+				if self.currentDisplayData['minfft'][channel] > downsampled[channel]: #if the new sample is less than the minimum, update the minimum.
+					self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
+				downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['minfft'][channel])
+			self.currentDisplayData['bargrahpHill_downsampled'][row] = downsampled
+			#draw bars
+	else:
+		downsampled = signal.resample(self.fftArray[:,-1], self.numBars)
 		downsampled = downsampled * 0.75
-		
-		#compute peaks
 		for channel in range(len(downsampled)):
 			if self.currentDisplayData['minfft'][channel] == -1: #check if minfft is initialized.
 				self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
 			if self.currentDisplayData['minfft'][channel] > downsampled[channel]: #if the new sample is less than the minimum, update the minimum.
 				self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
 			downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['minfft'][channel])
-		#draw bars
-		barWidth = int(self.WIDTH/(self.numBars+4))
+		self.currentDisplayData['bargrahpHill_downsampled'] = np.roll(self.currentDisplayData['bargrahpHill_downsampled'],-1,0)
+		self.currentDisplayData['bargrahpHill_downsampled'][-1] = downsampled
+	barWidth = int(self.WIDTH/(self.numBars+4))
+	for row in range(0,nrows-1):	
 		for xIdx in range(self.numBars):
 			xPos = int((xIdx+1) / (self.numBars+1) * self.WIDTH)
 			barcolor = list(self.currentDisplayData['FGcolorTuple'])
@@ -587,10 +596,7 @@ def bargraphHill(self, data, screen):
 			barcolor[1] = rs * barcolor[1]
 			barcolor[2] = rs * barcolor[2]
 			barcolor = tuple(barcolor)
-			pygame.draw.line(screen, barcolor, (xPos+xoff,yoff), (int(xPos+xoff),int(yoff-downsampled[xIdx])), barWidth)
-
-		# sampledTuple = fftline(np.array(self.fftArray[:,zoff])/2, self.WIDTH,xoff,yoff,100)
-		# pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),5)
+			pygame.draw.line(screen, barcolor, (xPos+self.persistantDisplayData['bargrahpHill_xoff'][row],self.persistantDisplayData['bargrahpHill_yoff'][row]), (int(xPos+self.persistantDisplayData['bargrahpHill_xoff'][row]),int(self.persistantDisplayData['bargrahpHill_yoff'][row]-self.currentDisplayData['bargrahpHill_downsampled'][row][xIdx])), barWidth)
 
 def fftHill(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']
@@ -601,10 +607,6 @@ def fftHill(self, data, screen):
 	x_stride = x_max/nrows
 	y_stride = y_max/nrows
 	z_stride = 4
-
-	x_start = x_max
-	# y_start = c
-	z_start = 0
 
 	if not 'fftHill_a' in self.persistantDisplayData:
 		c1 = (0,self.HEIGHT*7/8)
@@ -617,25 +619,22 @@ def fftHill(self, data, screen):
 		a = c_mat[0,0]
 		b = c_mat[1,0]
 		c = c_mat[2,0]
-		self.persistantDisplayData['fftHill_a'] = a
-		self.persistantDisplayData['fftHill_b'] = b
-		self.persistantDisplayData['fftHill_c'] = c
-	
-
+		self.persistantDisplayData['bargrahpHill_xoff'] = np.zeros(nrows)
+		self.persistantDisplayData['bargrahpHill_yoff'] = np.zeros(nrows)
+		for row in range(0,nrows-1):
+			self.persistantDisplayData['bargrahpHill_xoff'][row] = x_max - x_stride * row
+			self.persistantDisplayData['bargrahpHill_yoff'][row] = y_max - (a * (row ** 2) + b * row + c) #y_start - y_step_shrink * row * row - y_stride * row
 
 	for row in range(0,nrows-1):
-		xoff = x_max - x_stride * row
-		yoff = y_max - (self.persistantDisplayData['fftHill_a'] * (row ** 2) + self.persistantDisplayData['fftHill_b'] * row + self.persistantDisplayData['fftHill_c']) #y_start - y_step_shrink * row * row - y_stride * row
-		# yoff = y_start/2  np.abs(y_start/2 - y_stride * row)
 		zoff = -(row+1)
-		sampledTuple = fftline(np.array(self.fftArray[:,zoff])/2, self.WIDTH,xoff,yoff,100)
-		pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),5)
+		sampledTuple = fftline(np.array(self.fftArray[:,zoff])/2, self.WIDTH,self.persistantDisplayData['bargrahpHill_xoff'][row],self.persistantDisplayData['bargrahpHill_yoff'][row],100)
+		pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),10)
 
 
 def fftSignal(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']	
 	sampledTuple = fftline(self.fftArray[:,-1], self.WIDTH,0,round(self.HEIGHT * 0.9),100)
-	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),5)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),10)
      
 # run the main function only if this module is executed as the main script
 # (if you import this as a module then nothing is executed)
