@@ -455,14 +455,22 @@ def timeSignal(self, data, screen, color = None):
 
 
 def spectrogram(self,data,screen):
-	specArray = signal.resample (self.fftArray, 64, axis = 0)
-	blitArray = np.zeros((specArray.shape[0],specArray.shape[1],3))
-	specRes = np.clip(specArray/5,0,255)
-	blitArray[:,:,0] = specRes * self.currentDisplayData['BGcolorTuple1'][0]/255
-	blitArray[:,:,1] = specRes * self.currentDisplayData['BGcolorTuple1'][1]/255
-	blitArray[:,:,2] = specRes * self.currentDisplayData['BGcolorTuple1'][2]/255
+	if not 'blitArray' in self.currentDisplayData:
+		specArray = np.transpose(signal.resample (self.fftArray, 64, axis = 0))
+		blitArray = np.zeros((specArray.shape[0],specArray.shape[1],3))
+		specRes = np.clip(specArray/5,0,255)
+		blitArray[:,:,0] = specRes * self.currentDisplayData['BGcolorTuple1'][0]/255
+		blitArray[:,:,1] = specRes * self.currentDisplayData['BGcolorTuple1'][1]/255
+		blitArray[:,:,2] = specRes * self.currentDisplayData['BGcolorTuple1'][2]/255
+		self.currentDisplayData['blitArray'] = blitArray
+	else:
+		self.currentDisplayData['blitArray'] = np.roll(self.currentDisplayData['blitArray'],-1,0)
+		fftSlice =  np.clip(signal.resample (self.fftArray[:,-1], 64)/5,0,255)/255
+		self.currentDisplayData['blitArray'][-1,:,0] = fftSlice * self.currentDisplayData['BGcolorTuple1'][0]
+		self.currentDisplayData['blitArray'][-1,:,1] = fftSlice * self.currentDisplayData['BGcolorTuple1'][1]
+		self.currentDisplayData['blitArray'][-1,:,2] = fftSlice * self.currentDisplayData['BGcolorTuple1'][2]
 
-	surf = pygame.surfarray.make_surface(np.transpose(blitArray,(1,0,2)))
+	surf = pygame.surfarray.make_surface(self.currentDisplayData['blitArray'])
 	surfa = pygame.transform.scale(surf,(640,480))
 	# surfd = pygame.transform.flip(surfa,True, True)
 
@@ -471,26 +479,26 @@ def spectrogram(self,data,screen):
 
 def barchart(self, data, screen):
 	# background(data,screen)
-	if not 'minfft' in self.currentDisplayData:
-		self.currentDisplayData['minfft'] = np.zeros(self.numBars)-1
-		self.currentDisplayData['fftBargraphPeaks'] = np.zeros(self.numBars)
+	if not 'barchart_minfft' in self.currentDisplayData:
+		self.currentDisplayData['barchart_minfft'] = np.zeros(self.numBars)-1
+		self.currentDisplayData['barchart_fftBargraphPeaks'] = np.zeros(self.numBars)
 
 	downsampled = signal.resample(self.fftArray[:,-1], self.numBars)
 	downsampled = downsampled * 0.75
 	#compute peaks
 	for channel in range(len(downsampled)):
-		if self.currentDisplayData['minfft'][channel] == -1: #check if minfft is initialized.
-			self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
-		if self.currentDisplayData['minfft'][channel] > downsampled[channel]: #if the new sample is less than the minimum, update the minimum.
-			self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
-		downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['minfft'][channel])
-		self.currentDisplayData['fftBargraphPeaks'][channel] = peakDecay(downsampled[channel], self.currentDisplayData['fftBargraphPeaks'][channel], self.tau*5, self.CHUNK, self.RATE)
+		if self.currentDisplayData['barchart_minfft'][channel] == -1: #check if minfft is initialized.
+			self.currentDisplayData['barchart_minfft'][channel] = np.abs(downsampled[channel])
+		if self.currentDisplayData['barchart_minfft'][channel] > downsampled[channel]: #if the new sample is less than the minimum, update the minimum.
+			self.currentDisplayData['barchart_minfft'][channel] = np.abs(downsampled[channel])
+		downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['barchart_minfft'][channel])
+		self.currentDisplayData['barchart_fftBargraphPeaks'][channel] = peakDecay(downsampled[channel], self.currentDisplayData['barchart_fftBargraphPeaks'][channel], self.tau*5, self.CHUNK, self.RATE)
 	#draw bars
 	barWidth = int(self.WIDTH/(self.numBars+4))
 	for xIdx in range(self.numBars):
 		xPos = int((xIdx+1) / (self.numBars+1) * self.WIDTH)
 		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple'], (xPos,self.HEIGHT), (int(xPos),int(self.HEIGHT-downsampled[xIdx])), barWidth)
-		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple2'], (int(xPos-barWidth/2),int(self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx])), (int(xPos+barWidth/2),int(self.HEIGHT-self.currentDisplayData['fftBargraphPeaks'][xIdx])), 2)
+		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple2'], (int(xPos-barWidth/2),int(self.HEIGHT-self.currentDisplayData['barchart_fftBargraphPeaks'][xIdx])), (int(xPos+barWidth/2),int(self.HEIGHT-self.currentDisplayData['barchart_fftBargraphPeaks'][xIdx])), 2)
 	return
 
 def fftline(frame,width,xoff=0,yoff=0,nsamp=None):
@@ -584,8 +592,8 @@ def bargraphHill(self, data, screen):
 			if self.currentDisplayData['minfft'][channel] > downsampled[channel]: #if the new sample is less than the minimum, update the minimum.
 				self.currentDisplayData['minfft'][channel] = np.abs(downsampled[channel])
 			downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['minfft'][channel])
-		self.currentDisplayData['bargrahpHill_downsampled'] = np.roll(self.currentDisplayData['bargrahpHill_downsampled'],-1,0)
-		self.currentDisplayData['bargrahpHill_downsampled'][-1] = downsampled
+		self.currentDisplayData['bargrahpHill_downsampled'] = np.roll(self.currentDisplayData['bargrahpHill_downsampled'],1,0)
+		self.currentDisplayData['bargrahpHill_downsampled'][0] = downsampled
 	barWidth = int(self.WIDTH/(self.numBars+4))
 	for row in range(0,nrows-1):	
 		for xIdx in range(self.numBars):
@@ -596,7 +604,7 @@ def bargraphHill(self, data, screen):
 			barcolor[1] = rs * barcolor[1]
 			barcolor[2] = rs * barcolor[2]
 			barcolor = tuple(barcolor)
-			pygame.draw.line(screen, barcolor, (xPos+self.persistantDisplayData['bargrahpHill_xoff'][row],self.persistantDisplayData['bargrahpHill_yoff'][row]), (int(xPos+self.persistantDisplayData['bargrahpHill_xoff'][row]),int(self.persistantDisplayData['bargrahpHill_yoff'][row]-self.currentDisplayData['bargrahpHill_downsampled'][row][xIdx])), barWidth)
+			pygame.draw.line(screen, barcolor, (int(xPos+self.persistantDisplayData['bargrahpHill_xoff'][row]),int(self.persistantDisplayData['bargrahpHill_yoff'][row])), (int(xPos+self.persistantDisplayData['bargrahpHill_xoff'][row]),int(self.persistantDisplayData['bargrahpHill_yoff'][row]-self.currentDisplayData['bargrahpHill_downsampled'][row][xIdx])), barWidth)
 
 def fftHill(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']
@@ -619,15 +627,15 @@ def fftHill(self, data, screen):
 		a = c_mat[0,0]
 		b = c_mat[1,0]
 		c = c_mat[2,0]
-		self.persistantDisplayData['bargrahpHill_xoff'] = np.zeros(nrows)
-		self.persistantDisplayData['bargrahpHill_yoff'] = np.zeros(nrows)
+		self.persistantDisplayData['fftHill_xoff'] = np.zeros(nrows)
+		self.persistantDisplayData['fftHill_yoff'] = np.zeros(nrows)
 		for row in range(0,nrows-1):
-			self.persistantDisplayData['bargrahpHill_xoff'][row] = x_max - x_stride * row
-			self.persistantDisplayData['bargrahpHill_yoff'][row] = y_max - (a * (row ** 2) + b * row + c) #y_start - y_step_shrink * row * row - y_stride * row
+			self.persistantDisplayData['fftHill_xoff'][row] = x_max - x_stride * row
+			self.persistantDisplayData['fftHill_yoff'][row] = y_max - (a * (row ** 2) + b * row + c) #y_start - y_step_shrink * row * row - y_stride * row
 
 	for row in range(0,nrows-1):
 		zoff = -(row+1)
-		sampledTuple = fftline(np.array(self.fftArray[:,zoff])/2, self.WIDTH,self.persistantDisplayData['bargrahpHill_xoff'][row],self.persistantDisplayData['bargrahpHill_yoff'][row],100)
+		sampledTuple = fftline(np.array(self.fftArray[:,zoff])/2, self.WIDTH,self.persistantDisplayData['fftHill_xoff'][row],self.persistantDisplayData['fftHill_yoff'][row],100)
 		pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),10)
 
 
