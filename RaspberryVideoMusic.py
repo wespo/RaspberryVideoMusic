@@ -37,6 +37,8 @@ def toc():
 
 def ListDiff(list1, list2): 
     return (list(list(set(list1)-set(list2)) + list(set(list2)-set(list1)))) 
+def closest(lst, K): 
+    return lst[min(range(len(lst)), key = lambda i: abs(lst[i]-K))] 
 #### Signal Support functions
 # shift arr2 into the end of arr1, dropping len(arr2) samples at the start of arr1
 def shiftIn(arr1, arr2):
@@ -182,7 +184,7 @@ class piVideoMusic:
 		self.nextChangeTime = time.time()
 		self.currentDisplay = self.displayFunctions[0]
 		self.currentBackground = self.backgroundFunctions[0]
-	def generateColorTuples(self):
+	def generateColorTuplesOld(self):
 		fg1 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
 		fg2 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
 		bg1 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
@@ -202,47 +204,82 @@ class piVideoMusic:
 			bg2 = list(bg2)
 			bg2[random.choice([0,1,2])] = random.choice(self.colorlist[1:])
 			bg2 = tuple(bg2)
+		return fg1, fg2, bg1, bg2
+	def generateColorTuplesNew(self):
+		minBackgroundVal = 0
+		minDelta = 128
+		fg1 = [random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist)]
+		bg1 = [random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist)]
+		if max(bg1) <= minBackgroundVal:
+			minAllowedColor = list(filter(lambda i: i > minBackgroundVal, self.colorlist))[0]
+			minAllowedColorIdx = self.colorlist.index(minAllowedColor)
+			bg1[random.choice([0,1,2])] = random.choice(self.colorlist[minAllowedColorIdx:])
+		fgbg = np.abs((fg1[0]-bg1[0],fg1[1]-bg1[1],fg1[2]-bg1[2]))
+		iter_break = 0
+		print("Tweaking colors:", fg1, bg1, 0)
+		while max(fgbg) < minDelta:
+			if iter_break > 100:
+				print("ERROR! Too many tries to select color!")
+				break
+			else:
+				iter_break = iter_break + 1
 
-		# fg = [random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist)]
-		# bg = [random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist)]
-		# bg1 = bg
+			#find which column has the max delta
+			maxdelta = max(fgbg)
+			maxdelta_idx = list(fgbg).index(maxdelta)
+			#pull the FG and BG values
+			fgMaxDelta = fg1[maxdelta_idx]
+			bgMaxDelta = bg1[maxdelta_idx]
+			cll = len(self.colorlist)-1
+			if fgMaxDelta > bgMaxDelta: #fg is bigger
+				if (255-fgMaxDelta) > bgMaxDelta: #fg is further from top than bg is from bottom, increase fg
+					# fg1[maxdelta_idx] = self.colorlist[self.colorlist.index(fgMaxDelta)+1]
+					fg1[0] = self.colorlist[min(self.colorlist.index(fg1[0])+1, cll)]
+					fg1[1] = self.colorlist[min(self.colorlist.index(fg1[1])+1, cll)]
+					fg1[2] = self.colorlist[min(self.colorlist.index(fg1[2])+1, cll)]
+				else: #bg is further from bottom than fg is from top, decrease bg
+					# bg1[maxdelta_idx] = self.colorlist[self.colorlist.index(bgMaxDelta)-1]
+					bg1[0] = self.colorlist[max(self.colorlist.index(bg1[0])-1, 0)]
+					bg1[1] = self.colorlist[max(self.colorlist.index(bg1[1])-1, 0)]
+					bg1[2] = self.colorlist[max(self.colorlist.index(bg1[2])-1, 0)]
+			else: #bg is bigger
+				if (255-bgMaxDelta) > fgMaxDelta: #bg is further from top than fg is from bottom, increase bg
+					# bg1[maxdelta_idx] = self.colorlist[self.colorlist.index(bgMaxDelta)+1]
+					bg1[0] = self.colorlist[min(self.colorlist.index(bg1[0])+1, cll)]
+					bg1[1] = self.colorlist[min(self.colorlist.index(bg1[1])+1, cll)]
+					bg1[2] = self.colorlist[min(self.colorlist.index(bg1[2])+1, cll)]
+				else: #fg is further from bottom than bg is from top, decrease fg
+					# fg1[maxdelta_idx] = self.colorlist[self.colorlist.index(fgMaxDelta)-1]
+					fg1[0] = self.colorlist[max(self.colorlist.index(fg1[0])-1, 0)]
+					fg1[1] = self.colorlist[max(self.colorlist.index(fg1[1])-1, 0)]
+					fg1[2] = self.colorlist[max(self.colorlist.index(fg1[2])-1, 0)]
+			fgbg = np.abs((fg1[0]-bg1[0],fg1[1]-bg1[1],fg1[2]-bg1[2]))
+			print("Tweaking colors:", fg1, bg1, iter_break)
 
-		# fgh = list(colorsys.rgb_to_hsv(fg[0]/255,fg[1]/255,fg[2]/255))
-		# bgh = list(colorsys.rgb_to_hsv(bg[0]/255,bg[1]/255,bg[2]/255))
+		#create FG2 by applying a random HSV hue to FG1
+		fg2 = colorsys.rgb_to_hsv(fg1[0]/255,fg1[1]/255,fg1[2]/255)
+		fg2 = list(colorsys.rgb_to_hsv(random.random(),fg2[1],fg2[2]))
+		fg2[0] = closest(self.colorlist,fg2[0]*255)
+		fg2[1] = closest(self.colorlist,fg2[1]*255)
+		fg2[2] = closest(self.colorlist,fg2[2]*255)
 
-		# if np.abs(fgh[2] - bgh[2]) < 0.5:
-		# 	fgh[2] = (fgh[2] + 0.5) % 1.0
-		
-		# fg1 = list(colorsys.hsv_to_rgb(fgh[0],fgh[1],fgh[2]))
-		# fg1[0] = fg1[0] * 255
-		# fg1[1] = fg1[1] * 255
-		# fg1[2] = fg1[2] * 255
+		#create BG2 by applying a random HSV hue to BG1
+		bg2 = colorsys.rgb_to_hsv(bg1[0]/255,bg1[1]/255,bg1[2]/255)
+		bg2 = list(colorsys.rgb_to_hsv(random.random(),bg2[1],bg2[2]))
+		bg2[0] = closest(self.colorlist,bg2[0]*255)
+		bg2[1] = closest(self.colorlist,bg2[1]*255)
+		bg2[2] = closest(self.colorlist,bg2[2]*255)
 
-		# fg2_h = random.random()
-		# if (fg2_h - fgh[0]) < 0.1:
-		# 	fg2_h = (fg2_h + 0.1) % 1.0
-		# fg2 = list(colorsys.hsv_to_rgb(fg2_h,fgh[1],fgh[2]))
-		# fg2[0] = fg2[0] * 255
-		# fg2[1] = fg2[1] * 255
-		# fg2[2] = fg2[2] * 255
-
-		# bg2_h = random.random()
-		# if (bg2_h - bgh[0]) < 0.1:
-		# 	bg2_h = (bg2_h + 0.1) % 1.0
-		# bg2 = list(colorsys.hsv_to_rgb(bg2_h,bgh[1],bgh[2]))
-		# bg2[0] = bg2[0] * 255
-		# bg2[1] = bg2[1] * 255
-		# bg2[2] = bg2[2] * 255
-
-		# fg1 = tuple(fg1)
-		# fg2 = tuple(fg2)
-		# bg1 = tuple(bg1)
-		# bg2 = tuple(bg2)
-		# print(colorsys.rgb_to_hsv(fg1[0]/255,fg1[1]/255,fg1[2]/255),colorsys.rgb_to_hsv(fg2[0]/255,fg2[1]/255,fg2[2]/255),colorsys.rgb_to_hsv(bg1[0]/255,bg1[1]/255,bg1[2]/255),colorsys.rgb_to_hsv(bg2[0]/255,bg2[1]/255,bg2[2]/255))
-
-		#ensure that 
+		bg2 = bg1
+		#convert to tuples.
+		fg1 = tuple(fg1)
+		fg2 = tuple(fg2)
+		bg1 = tuple(bg1)
+		bg2 = tuple(bg2)
 
 		return fg1, fg2, bg1, bg2
+	def generateColorTuples(self):
+		return self.generateColorTuplesNew()
 	def refreshCurrentDisplay(self):
 		newData = {}
 		newData['FGcolorTuple'], newData['FGcolorTuple2'], newData['BGcolorTuple1'], newData['BGcolorTuple2'] = self.generateColorTuples()
@@ -729,7 +766,7 @@ if __name__=="__main__":
 	parser.add_argument('-w', action="store_false", help="windowed mode")
 	args = parser.parse_args()
 	bgs = [spectrogram,background,peakDiamonds,meanDiamonds]
-	fgs = [[bargraphHill,timeSignal, fftSignal, fftHill, barchart]
+	fgs = [bargraphHill,timeSignal, fftSignal, fftHill, barchart]
 	PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w) #
 	while PVM.running:
 		PVM.processEvent()
