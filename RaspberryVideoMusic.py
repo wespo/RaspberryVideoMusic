@@ -203,7 +203,41 @@ class piVideoMusic:
 			bg2[random.choice([0,1,2])] = random.choice(self.colorlist[1:])
 			bg2 = tuple(bg2)
 
+		# fg = [random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist)]
+		# bg = [random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist)]
+		# bg1 = bg
 
+		# fgh = list(colorsys.rgb_to_hsv(fg[0]/255,fg[1]/255,fg[2]/255))
+		# bgh = list(colorsys.rgb_to_hsv(bg[0]/255,bg[1]/255,bg[2]/255))
+
+		# if np.abs(fgh[2] - bgh[2]) < 0.5:
+		# 	fgh[2] = (fgh[2] + 0.5) % 1.0
+		
+		# fg1 = list(colorsys.hsv_to_rgb(fgh[0],fgh[1],fgh[2]))
+		# fg1[0] = fg1[0] * 255
+		# fg1[1] = fg1[1] * 255
+		# fg1[2] = fg1[2] * 255
+
+		# fg2_h = random.random()
+		# if (fg2_h - fgh[0]) < 0.1:
+		# 	fg2_h = (fg2_h + 0.1) % 1.0
+		# fg2 = list(colorsys.hsv_to_rgb(fg2_h,fgh[1],fgh[2]))
+		# fg2[0] = fg2[0] * 255
+		# fg2[1] = fg2[1] * 255
+		# fg2[2] = fg2[2] * 255
+
+		# bg2_h = random.random()
+		# if (bg2_h - bgh[0]) < 0.1:
+		# 	bg2_h = (bg2_h + 0.1) % 1.0
+		# bg2 = list(colorsys.hsv_to_rgb(bg2_h,bgh[1],bgh[2]))
+		# bg2[0] = bg2[0] * 255
+		# bg2[1] = bg2[1] * 255
+		# bg2[2] = bg2[2] * 255
+
+		# fg1 = tuple(fg1)
+		# fg2 = tuple(fg2)
+		# bg1 = tuple(bg1)
+		# bg2 = tuple(bg2)
 		# print(colorsys.rgb_to_hsv(fg1[0]/255,fg1[1]/255,fg1[2]/255),colorsys.rgb_to_hsv(fg2[0]/255,fg2[1]/255,fg2[2]/255),colorsys.rgb_to_hsv(bg1[0]/255,bg1[1]/255,bg1[2]/255),colorsys.rgb_to_hsv(bg2[0]/255,bg2[1]/255,bg2[2]/255))
 
 		#ensure that 
@@ -445,7 +479,7 @@ def timeSignal(self, data, screen, color = None):
 	sampledTuple =[]
 	xoff = 0 
 	xstep = self.WIDTH/len(downsampled)
-	yoff = self.HEIGHT/2
+	yoff = self.HEIGHT/2 + np.mean(downsampled)
 	for sample in downsampled:
 		sampledTuple.append((round(xoff),round(yoff-sample)))
 		xoff = xoff + xstep
@@ -498,21 +532,46 @@ def barchart(self, data, screen):
 	for xIdx in range(self.numBars):
 		xPos = int((xIdx+1) / (self.numBars+1) * self.WIDTH)
 		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple'], (xPos,self.HEIGHT), (int(xPos),int(self.HEIGHT-downsampled[xIdx])), barWidth)
-		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple2'], (int(xPos-barWidth/2),int(self.HEIGHT-self.currentDisplayData['barchart_fftBargraphPeaks'][xIdx])), (int(xPos+barWidth/2),int(self.HEIGHT-self.currentDisplayData['barchart_fftBargraphPeaks'][xIdx])), 2)
+		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple2'], (int(xPos-barWidth/2),int(self.HEIGHT-self.currentDisplayData['barchart_fftBargraphPeaks'][xIdx])), (int(xPos+barWidth/2),int(self.HEIGHT-self.currentDisplayData['barchart_fftBargraphPeaks'][xIdx])), 7)
 	return
 
-def fftline(frame,width,xoff=0,yoff=0,nsamp=None):
+def fftline(frame,width,xoff=0,yoff=0,nsamp=None,scale_denom=4):
 	if nsamp == None:
 		nsamp = width
-	downsampled = signal.resample(frame,nsamp)
-	downsampled = downsampled/4	
+		downsampled = frame
+	else:
+		downsampled = signal.resample(frame,nsamp)
+	if scale_denom is not None:
+		downsampled = downsampled/scale_denom
 	sampledTuple =[]
 	xstep = width/len(downsampled)
 	for sample in downsampled:
 		sampledTuple.append((round(xoff),round(yoff-sample)))
 		xoff = xoff + xstep
 	return sampledTuple
-def fftWaterfall(self, data, screen):
+
+
+def fftSurf(frame,width,color=(0,0,0),nsamp=None,scale_denom=4): #draws an FFT frame on a surface and returns it.
+
+	if nsamp == None:
+		nsamp = width
+		downsampled = frame
+	else:
+		downsampled = signal.resample(frame,nsamp)
+	if scale_denom is not None:
+		downsampled = downsampled/scale_denom
+	sampledTuple =[]
+	xoff = 0
+	xstep = width/len(downsampled)
+	frame_max = max(downsampled)
+	for sample in downsampled:
+		sampledTuple.append((round(xoff),round(frame_max - sample)))
+		xoff = xoff + xstep
+	size = (width, frame_max)
+	surf = pygame.Surface(size, pygame.SRCALPHA)
+	pygame.draw.lines(surf,color,False,np.array(sampledTuple).astype(np.int64),5)
+	return surf
+def fftWaterfall(self, data, screen): #old, inefficient, not pretty
 	color = self.currentDisplayData['FGcolorTuple']
 	nrows = 15
 
@@ -609,9 +668,9 @@ def bargraphHill(self, data, screen):
 def fftHill(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']
 	nrows = 20
-
+	nsamp = 100
 	x_max = self.WIDTH/5
-	y_max = self.HEIGHT*1.2
+	y_max = self.HEIGHT*1.3
 	x_stride = x_max/nrows
 	y_stride = y_max/nrows
 	z_stride = 4
@@ -632,12 +691,24 @@ def fftHill(self, data, screen):
 		for row in range(0,nrows-1):
 			self.persistantDisplayData['fftHill_xoff'][row] = x_max - x_stride * row
 			self.persistantDisplayData['fftHill_yoff'][row] = y_max - (a * (row ** 2) + b * row + c) #y_start - y_step_shrink * row * row - y_stride * row
+	if not 'fftHill_buffer' in self.currentDisplayData:
+		self.currentDisplayData['fftHill_scale_fac'] = 8
+		self.currentDisplayData['fftHill_buffer'] = []
+		for row in range(0,nrows-1):
+			zoff = -(row+1)
+			surf = fftSurf(np.array(self.fftArray[:,zoff]), self.WIDTH, color=color,nsamp=nsamp,scale_denom=self.currentDisplayData['fftHill_scale_fac'])
+			self.currentDisplayData['fftHill_buffer'].append(surf)
+	else:
+		self.currentDisplayData['fftHill_buffer'].pop()
+		surf = fftSurf(np.array(self.fftArray[:,-1]), self.WIDTH, color=color,nsamp=nsamp,scale_denom=self.currentDisplayData['fftHill_scale_fac'])
+		self.currentDisplayData['fftHill_buffer'].insert(0,surf)
+
 
 	for row in range(0,nrows-1):
 		zoff = -(row+1)
-		sampledTuple = fftline(np.array(self.fftArray[:,zoff])/2, self.WIDTH,self.persistantDisplayData['fftHill_xoff'][row],self.persistantDisplayData['fftHill_yoff'][row],100)
-		pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),10)
-
+		currentRow = self.currentDisplayData['fftHill_buffer'][row]
+		w, h = currentRow.get_size()
+		self.screen.blit(currentRow, (self.persistantDisplayData['fftHill_xoff'][row],self.persistantDisplayData['fftHill_yoff'][row]-h))
 
 def fftSignal(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']	
@@ -658,7 +729,7 @@ if __name__=="__main__":
 	parser.add_argument('-w', action="store_false", help="windowed mode")
 	args = parser.parse_args()
 	bgs = [spectrogram,background,peakDiamonds,meanDiamonds]
-	fgs = [bargraphHill,timeSignal, fftSignal, fftHill, barchart]
+	fgs = [[bargraphHill,timeSignal, fftSignal, fftHill, barchart]
 	PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w) #
 	while PVM.running:
 		PVM.processEvent()
