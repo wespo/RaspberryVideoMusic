@@ -4,6 +4,7 @@ import pygame
 import pyaudio
 import numpy as np
 from scipy import signal
+from scipy import interpolate
 from scipy.fftpack import rfft, fftshift
 import time
 import random
@@ -22,6 +23,170 @@ FRAMEREADY = pygame.USEREVENT+1
 
 tStart = time.time()
 clamp = lambda n, minn, maxn: max(min(maxn, n), minn)
+
+f = np.array(
+    [
+        20,
+        25,
+        31.5,
+        40,
+        50,
+        63,
+        80,
+        100,
+        125,
+        160,
+        200,
+        250,
+        315,
+        400,
+        500,
+        630,
+        800,
+        1000,
+        1250,
+        1600,
+        2000,
+        2500,
+        3150,
+        4000,
+        5000,
+        6300,
+        8000,
+        10000,
+        12500,
+    ]
+)
+af = np.array(
+    [
+        0.532,
+        0.506,
+        0.480,
+        0.455,
+        0.432,
+        0.409,
+        0.387,
+        0.367,
+        0.349,
+        0.330,
+        0.315,
+        0.301,
+        0.288,
+        0.276,
+        0.267,
+        0.259,
+        0.253,
+        0.250,
+        0.246,
+        0.244,
+        0.243,
+        0.243,
+        0.243,
+        0.242,
+        0.242,
+        0.245,
+        0.254,
+        0.271,
+        0.301,
+    ]
+)
+Lu = np.array(
+    [
+        -31.6,
+        -27.2,
+        -23.0,
+        -19.1,
+        -15.9,
+        -13.0,
+        -10.3,
+        -8.1,
+        -6.2,
+        -4.5,
+        -3.1,
+        -2.0,
+        -1.1,
+        -0.4,
+        0.0,
+        0.3,
+        0.5,
+        0.0,
+        -2.7,
+        -4.1,
+        -1.0,
+        1.7,
+        2.5,
+        1.2,
+        -2.1,
+        -7.1,
+        -11.2,
+        -10.7,
+        -3.1,
+    ]
+)
+Tf = np.array(
+    [
+        78.5,
+        68.7,
+        59.5,
+        51.1,
+        44.0,
+        37.5,
+        31.5,
+        26.5,
+        22.1,
+        17.9,
+        14.4,
+        11.4,
+        8.6,
+        6.2,
+        4.4,
+        3.0,
+        2.2,
+        2.4,
+        3.5,
+        1.7,
+        -1.3,
+        -4.2,
+        -6.0,
+        -5.4,
+        -1.5,
+        6.0,
+        12.6,
+        13.9,
+        12.3,
+    ]
+)
+
+
+def elc(phon, frequencies=None):
+    """Returns an equal-loudness contour.
+
+    Args:
+        phon (float): Phon value of the contour.
+        frequencies (:obj:`np.ndarray`, optional): Frequencies to evaluate. If not
+            passed, all 29 points of the ISO standard are returned. Any frequencies not
+            present in the standard are found via spline interpolation.
+
+    Returns:
+        contour (np.ndarray): db SPL values.
+
+    """
+    assert 0 <= phon <= 90, f"{phon} is not [0, 90]"
+    Ln = phon
+    Af = (
+        4.47e-3 * (10 ** (0.025 * Ln) - 1.15)
+        + (0.4 * 10 ** (((Tf + Lu) / 10) - 9)) ** af
+    )
+    Lp = ((10.0 / af) * np.log10(Af)) - Lu + 94
+
+    if frequencies is not None:
+
+        assert frequencies.min() >= f.min(), "Frequencies are too low"
+        assert frequencies.max() <= f.max(), "Frequencies are too high"
+        tck = interpolate.splrep(f, Lp, s=0)
+        Lp = interpolate.splev(frequencies, tck, der=0)
+
+    return Lp
 
 def display_none(self,data,screen):
 	return
@@ -104,7 +269,13 @@ class piVideoMusic:
 		self.count_target = 1000
 		self.sampleBuffer = np.zeros(self.RATE*4)
 
+		self.logSpaceIndices = np.floor(np.logspace(0.41,3.34,self.CHUNK)).astype(int) #consen for visual pleasantness.
+		self.Lp = elc(60,np.linspace(20,12500,1250)) #1250 is a magic constant, should be computed from CHUNK and RATE to get the the number of bins between 20 and 12500Hz (limits of elc function)
+		self.Lp = np.pad(self.Lp,(0,self.CHUNK-len(self.Lp)),'edge')
+		self.Lp = self.Lp / np.mean(self.Lp) / 1.2
+
 		self.fftArray = np.zeros([self.CHUNK,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
+		self.fftLogArray = np.zeros([self.CHUNK,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
 
 		self.persistantDisplayData={}
 		self.currentDisplayData=self.refreshCurrentDisplay()
@@ -206,8 +377,8 @@ class piVideoMusic:
 			bg2 = tuple(bg2)
 		return fg1, fg2, bg1, bg2
 	def generateColorTuplesNew(self):
-		minBackgroundVal = 0
-		minDelta = 128
+		minBackgroundVal = 0 #at least one channel of the bg1 color must be higher than this value.
+		minDelta = 128 #at least one channel of bg1 and fg1 colors must be more than this amount apart.
 		fg1 = [random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist)]
 		bg1 = [random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist)]
 		if max(bg1) <= minBackgroundVal:
@@ -233,23 +404,23 @@ class piVideoMusic:
 			cll = len(self.colorlist)-1
 			if fgMaxDelta > bgMaxDelta: #fg is bigger
 				if (255-fgMaxDelta) > bgMaxDelta: #fg is further from top than bg is from bottom, increase fg
-					# fg1[maxdelta_idx] = self.colorlist[self.colorlist.index(fgMaxDelta)+1]
-					fg1[0] = self.colorlist[min(self.colorlist.index(fg1[0])+1, cll)]
+					# fg1[maxdelta_idx] = self.colorlist[self.colorlist.index(fgMaxDelta)+1] #older code, only increases largest delta channel -- missing bugfix for max or min value.
+					fg1[0] = self.colorlist[min(self.colorlist.index(fg1[0])+1, cll)] #newer code, increaseas all channels
 					fg1[1] = self.colorlist[min(self.colorlist.index(fg1[1])+1, cll)]
 					fg1[2] = self.colorlist[min(self.colorlist.index(fg1[2])+1, cll)]
 				else: #bg is further from bottom than fg is from top, decrease bg
-					# bg1[maxdelta_idx] = self.colorlist[self.colorlist.index(bgMaxDelta)-1]
+					# bg1[maxdelta_idx] = self.colorlist[self.colorlist.index(bgMaxDelta)-1] #older code, only increases largest delta channel
 					bg1[0] = self.colorlist[max(self.colorlist.index(bg1[0])-1, 0)]
 					bg1[1] = self.colorlist[max(self.colorlist.index(bg1[1])-1, 0)]
 					bg1[2] = self.colorlist[max(self.colorlist.index(bg1[2])-1, 0)]
 			else: #bg is bigger
 				if (255-bgMaxDelta) > fgMaxDelta: #bg is further from top than fg is from bottom, increase bg
-					# bg1[maxdelta_idx] = self.colorlist[self.colorlist.index(bgMaxDelta)+1]
+					# bg1[maxdelta_idx] = self.colorlist[self.colorlist.index(bgMaxDelta)+1] #older code, only increases largest delta channel
 					bg1[0] = self.colorlist[min(self.colorlist.index(bg1[0])+1, cll)]
 					bg1[1] = self.colorlist[min(self.colorlist.index(bg1[1])+1, cll)]
 					bg1[2] = self.colorlist[min(self.colorlist.index(bg1[2])+1, cll)]
 				else: #fg is further from bottom than bg is from top, decrease fg
-					# fg1[maxdelta_idx] = self.colorlist[self.colorlist.index(fgMaxDelta)-1]
+					# fg1[maxdelta_idx] = self.colorlist[self.colorlist.index(fgMaxDelta)-1] #older code, only increases largest delta channel
 					fg1[0] = self.colorlist[max(self.colorlist.index(fg1[0])-1, 0)]
 					fg1[1] = self.colorlist[max(self.colorlist.index(fg1[1])-1, 0)]
 					fg1[2] = self.colorlist[max(self.colorlist.index(fg1[2])-1, 0)]
@@ -338,6 +509,12 @@ class piVideoMusic:
 		newFrame2 = np.array(self.fftwindow(data[-int(self.CHUNK*3/2):-int(self.CHUNK/2)]))
 		newFrame = np.column_stack((newFrame1,newFrame2))
 		self.fftArray = shiftIn2DCols(self.fftArray, newFrame)
+
+		#compute logspaced FFT
+		newFrameLog1 = np.interp(self.logSpaceIndices, np.linspace(0,self.CHUNK,self.CHUNK), newFrame1/self.Lp)
+		newFrameLog2 = np.interp(self.logSpaceIndices, np.linspace(0,self.CHUNK,self.CHUNK), newFrame2/self.Lp)
+		newFrameLog = np.column_stack((newFrameLog1,newFrameLog2))
+		self.fftLogArray = shiftIn2DCols(self.fftLogArray, newFrameLog)
 		return signal_pk
 
 	def updateFrame(self,screen, data, displayFunctions, backgroundFunctions, nextChangeTime, currentDisplay, currentDisplayData, currentBackground, signal_pk): #update the screen

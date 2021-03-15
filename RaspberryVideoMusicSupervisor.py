@@ -12,7 +12,7 @@ while True:
     if len(processes) == 0: #no uniac process running. Launch.
         restartCount += 1
         print("Did not find living PiVideoMusic process. Oh No! Launching PiVideoMusic. Restart count = {} at time: {}".format(restartCount, time.asctime(time.localtime())))
-        os.popen("/usr/bin/python3 -u /home/pi/RaspberryVideoMusic.py 1>>/home/pi/RaspberryVideoMusic_log.txt 2>&1 &")
+        os.popen("/usr/bin/python3 -u /home/pi/RaspberryVideoMusic/RaspberryVideoMusic.py 1>>/home/pi/RaspberryVideoMusic/RaspberryVideoMusic_log.txt 2>&1 &")
         print("OK, sleeping.")
     else:
         processes.pop(0) #pop first UNIAC process
