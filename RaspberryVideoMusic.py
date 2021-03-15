@@ -5,7 +5,7 @@ import pyaudio
 import numpy as np
 from scipy import signal
 from scipy import interpolate
-from scipy.fftpack import rfft, fftshift
+from scipy.fft import rfft, fftshift
 import time
 import random
 import colorsys
@@ -249,6 +249,9 @@ def peakDecay(val, oldVal, tau, CHUNK, RATE):
 class piVideoMusic:
 	def __init__(self,displayFunctions=None,backgroundFunctions=None,listFlag=False,videoInterface=0,audioInterface=0,fullscreen=True):
 		self.CHUNK=2205
+		self.nFFTFrames = 2
+		self.FFTLEN = self.nFFTFrames*(self.CHUNK//2 + 1)
+		self.FFTOverlap = 1/2 #offset of next frame. 0=frameA&B are identical.
 		self.RATE=44100
 		self.WIDTH=640
 		self.HEIGHT=480
@@ -270,12 +273,12 @@ class piVideoMusic:
 		self.sampleBuffer = np.zeros(self.RATE*4)
 
 		self.logSpaceIndices = np.floor(np.logspace(0.41,3.34,self.CHUNK)).astype(int) #consen for visual pleasantness.
-		self.Lp = elc(60,np.linspace(20,12500,1250)) #1250 is a magic constant, should be computed from CHUNK and RATE to get the the number of bins between 20 and 12500Hz (limits of elc function)
-		self.Lp = np.pad(self.Lp,(0,self.CHUNK-len(self.Lp)),'edge')
-		self.Lp = self.Lp / np.mean(self.Lp) / 1.2
+		self.LogPts = [0,20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000]
+		# self.Lp = elc(60,np.linspace(20,12500,1250)) #1250 is a magic constant, should be computed from CHUNK and RATE to get the the number of bins between 20 and 12500Hz (limits of elc function)
+		# self.Lp = np.pad(self.Lp,(0,self.CHUNK-len(self.Lp)),'edge')
+		# self.Lp = self.Lp / np.mean(self.Lp) / 1.2
 
-		self.fftArray = np.zeros([self.CHUNK,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
-		self.fftLogArray = np.zeros([self.CHUNK,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
+		self.fftArray = np.zeros([self.FFTLEN,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
 
 		self.persistantDisplayData={}
 		self.currentDisplayData=self.refreshCurrentDisplay()
@@ -349,7 +352,7 @@ class piVideoMusic:
 				interfaceInfo = p.get_device_info_by_index(i)
 				print(audioInterfaceString.format(interfaceInfo['index'],interfaceInfo['name'],interfaceInfo['maxInputChannels'],interfaceInfo['maxOutputChannels'],interfaceInfo['defaultSampleRate'],marker))
 		#input stream setup
-		self.stream=p.open(format = pyaudio.paInt16,rate=self.RATE,channels=1, input_device_index = audioInterface, input=True, frames_per_buffer=self.CHUNK, stream_callback=self.processBuffer) #on Win7 PC, 1 = Microphone, 2 = stereo mix (enabled in sound control panel)
+		self.stream=p.open(format = pyaudio.paInt16,rate=self.RATE,channels=1, input_device_index = audioInterface, input=True, frames_per_buffer=self.CHUNK, stream_callback=self.processBuffer) #on Win7 PC, 1 = Microphone, 3 = stereo mix (enabled in sound control panel)
 
 		#display state initialization:
 		self.nextChangeTime = time.time()
@@ -467,11 +470,44 @@ class piVideoMusic:
 			if event.type == pygame.QUIT:
 				# change the value to False, to exit the main loop
 				self.running = False
+	def lintoaudio(self,vector_in):
+		linBinSize = round(self.RATE/(2*self.FFTLEN))
+		result = np.zeros(len(self.LogPts)-1)
+		# print("Diagnostics:")
+		for idx in range(len(self.LogPts)-1):
+			startFreq = self.LogPts[idx]
+			endFreq = self.LogPts[idx+1]
+			startBin = int(np.floor(startFreq/linBinSize))
+			endBin = int(np.floor(endFreq/linBinSize))
+
+			startBinMaxF = (startBin+1)*linBinSize
+			startBinFrac = (startBinMaxF - startFreq)/linBinSize
+			if startBin == endBin:
+				startBinFrac = 0
+
+			endBinMinF = endBin*linBinSize
+			endBinFrac = (endFreq-endBinMinF)/linBinSize
+
+			binAccum = 0
+			binAccum = vector_in[startBin]*startBinFrac
+			for binNum in range(startBin+1,endBin):
+				binAccum = binAccum + vector_in[binNum]
+			binAccum = binAccum + vector_in[endBin]*endBinFrac
+			result[idx] = binAccum/(endFreq-startFreq)*5
+
+			#diagnostics.
+			# print(f'\tidx:{idx}\tstartBin:{startBin}\tendBin:{endBin}\tstartFreq:{startFreq}\tendFreq:{endFreq}\tstartBinMaxF:{startBinMaxF}\tendBinMinF:{endBinMinF}\tstartBinFrac:{startBinFrac}\tendBinFrac:{endBinFrac}')
+
+
+		return result
+
+		
 	def fftwindow(self, data):
 		window = signal.hamming(len(data))
 		w_data = data * window
 		fft_data = np.absolute(rfft(w_data))
 		fft_data = 200 * np.log10(fft_data*self.digitalGain)
+		fft_data = np.clip(np.nan_to_num(fft_data),0,1000)
 		return fft_data
 
 	def agc(self,data,newPk): #AGC gain and peak detect
@@ -505,16 +541,11 @@ class piVideoMusic:
 		self.digitalGain = self.agc(data,newPk)
 		self.signal_pk = peakDecay(newPk*self.digitalGain, self.signal_pk, self.tau, self.CHUNK, self.RATE)
 		#compute fft
-		newFrame1 = np.array(self.fftwindow(data[-self.CHUNK:]))
-		newFrame2 = np.array(self.fftwindow(data[-int(self.CHUNK*3/2):-int(self.CHUNK/2)]))
+		newFrame1 = np.array(self.fftwindow(data[-self.CHUNK*self.nFFTFrames:]))
+		newFrame2 = np.array(self.fftwindow(data[-int(self.CHUNK*(1+self.FFTOverlap)*self.nFFTFrames):-int(self.CHUNK*self.FFTOverlap*self.nFFTFrames)]))
 		newFrame = np.column_stack((newFrame1,newFrame2))
 		self.fftArray = shiftIn2DCols(self.fftArray, newFrame)
 
-		#compute logspaced FFT
-		newFrameLog1 = np.interp(self.logSpaceIndices, np.linspace(0,self.CHUNK,self.CHUNK), newFrame1/self.Lp)
-		newFrameLog2 = np.interp(self.logSpaceIndices, np.linspace(0,self.CHUNK,self.CHUNK), newFrame2/self.Lp)
-		newFrameLog = np.column_stack((newFrameLog1,newFrameLog2))
-		self.fftLogArray = shiftIn2DCols(self.fftLogArray, newFrameLog)
 		return signal_pk
 
 	def updateFrame(self,screen, data, displayFunctions, backgroundFunctions, nextChangeTime, currentDisplay, currentDisplayData, currentBackground, signal_pk): #update the screen
@@ -725,6 +756,31 @@ def spectrogram(self,data,screen):
 	screen.blit(surfa, (0,0))
 
 
+def barchartLogspace(self, data, screen):
+	# background(data,screen)
+	downsampled = self.lintoaudio(self.fftArray[:,-1])
+	if not 'barchart_logspace' in self.currentDisplayData:
+		self.currentDisplayData['barchart_logspace'] = np.zeros(len(downsampled))-1
+		self.currentDisplayData['barchart_logspacePeaks'] = np.zeros(len(downsampled))
+
+	
+	# print(len(downsampled))
+	#compute peaks
+	for channel in range(len(downsampled)):
+		if self.currentDisplayData['barchart_logspace'][channel] == -1: #check if minfft is initialized.
+			self.currentDisplayData['barchart_logspace'][channel] = np.abs(downsampled[channel])
+		if self.currentDisplayData['barchart_logspace'][channel] > downsampled[channel]: #if the new sample is less than the minimum, update the minimum.
+			self.currentDisplayData['barchart_logspace'][channel] = np.abs(downsampled[channel])
+		downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['barchart_logspace'][channel])
+		self.currentDisplayData['barchart_logspacePeaks'][channel] = peakDecay(downsampled[channel], self.currentDisplayData['barchart_logspacePeaks'][channel], self.tau*5, self.CHUNK, self.RATE)
+	#draw bars
+	barWidth = int(self.WIDTH/(len(self.LogPts)-1+4))
+	for xIdx in range(len(downsampled)):
+		xPos = int((xIdx+1) / (len(self.LogPts)-1+1) * self.WIDTH)
+		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple'], (xPos,self.HEIGHT), (int(xPos),int(self.HEIGHT-downsampled[xIdx])), barWidth)
+		pygame.draw.line(screen, self.currentDisplayData['FGcolorTuple2'], (int(xPos-barWidth/2),int(self.HEIGHT-self.currentDisplayData['barchart_logspacePeaks'][xIdx])), (int(xPos+barWidth/2),int(self.HEIGHT-self.currentDisplayData['barchart_logspacePeaks'][xIdx])), 7)
+	return
+
 def barchart(self, data, screen):
 	# background(data,screen)
 	if not 'barchart_minfft' in self.currentDisplayData:
@@ -928,6 +984,17 @@ def fftSignal(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']	
 	sampledTuple = fftline(self.fftArray[:,-1], self.WIDTH,0,round(self.HEIGHT * 0.9),100)
 	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),10)
+
+def fftQuad(self, data, screen):
+	color = self.currentDisplayData['FGcolorTuple']	
+	sampledTuple1 = fftline(self.fftArray[:,-1], self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),100)
+	sampledTuple2 = fftline(self.fftArray[:,-1], -self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),100)
+	sampledTuple3 = fftline(-1*self.fftArray[:,-1], self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),100)
+	sampledTuple4 = fftline(-1*self.fftArray[:,-1], -self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),100)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple1).astype(np.int64),10)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple2).astype(np.int64),10)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple3).astype(np.int64),10)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple4).astype(np.int64),10)
      
 # run the main function only if this module is executed as the main script
 # (if you import this as a module then nothing is executed)
@@ -943,7 +1010,7 @@ if __name__=="__main__":
 	parser.add_argument('-w', action="store_false", help="windowed mode")
 	args = parser.parse_args()
 	bgs = [spectrogram,background,peakDiamonds,meanDiamonds]
-	fgs = [bargraphHill,timeSignal, fftSignal, fftHill, barchart]
+	fgs = [fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart]
 	PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w) #
 	while PVM.running:
 		PVM.processEvent()
