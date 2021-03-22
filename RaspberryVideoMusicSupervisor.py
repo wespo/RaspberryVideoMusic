@@ -20,4 +20,4 @@ while True:
                 print("Found living {} PiVideoMusic process: {}".format(len(processes)+1,process))
                 os.popen("kill {}".format(process.split[0]))
                 print("All is well. Sleeping.")
-    time.sleep(20)
+    time.sleep(7)

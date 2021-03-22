@@ -249,7 +249,7 @@ def peakDecay(val, oldVal, tau, CHUNK, RATE):
 class piVideoMusic:
 	def __init__(self,displayFunctions=None,backgroundFunctions=None,listFlag=False,videoInterface=0,audioInterface=0,fullscreen=True, verbose=False):
 		self.CHUNK=2205
-		self.nFFTFrames = 2
+		self.nFFTFrames = 1
 		self.FFTLEN = self.nFFTFrames*(self.CHUNK//2 + 1)
 		self.FFTOverlap = 1/2 #offset of next frame. 0=frameA&B are identical.
 		self.RATE=44100
@@ -261,6 +261,8 @@ class piVideoMusic:
 		self.tau = 0.05 #set tau = 0.2 -> 5*tau = 1sec
 		self.numBars = 12
 		self.verbose = verbose
+		self.diagCount = 0
+		self.fgSet = 'dark'
 
 		#AGC gain and peak detect
 		self.max_gain = 1
@@ -274,12 +276,13 @@ class piVideoMusic:
 		self.sampleBuffer = np.zeros(self.RATE*4)
 
 		self.logSpaceIndices = np.floor(np.logspace(0.41,3.34,self.CHUNK)).astype(int) #consen for visual pleasantness.
-		self.LogPts = [0,20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000]
+		# self.LogPts = [0,20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000]
+		self.LogPts = [0,80,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000]
 		# self.Lp = elc(60,np.linspace(20,12500,1250)) #1250 is a magic constant, should be computed from CHUNK and RATE to get the the number of bins between 20 and 12500Hz (limits of elc function)
 		# self.Lp = np.pad(self.Lp,(0,self.CHUNK-len(self.Lp)),'edge')
 		# self.Lp = self.Lp / np.mean(self.Lp) / 1.2
 
-		self.fftArray = np.zeros([self.FFTLEN,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
+		self.fftArray = np.zeros([277,int(self.time_to_buf_fft*self.RATE/self.CHUNK)]) #np.zeros([self.FFTLEN,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
 
 		self.persistantDisplayData={}
 		self.currentDisplayData=self.refreshCurrentDisplay()
@@ -359,6 +362,27 @@ class piVideoMusic:
 		self.nextChangeTime = time.time()
 		self.currentDisplay = self.displayFunctions[0]
 		self.currentBackground = self.backgroundFunctions[0]
+
+	def generateColorTuplesSet(self):
+		#bright = [(235, 52, 52),(235, 122, 52),(255, 230, 0),(0, 255, 128),(0, 255, 255),(120, 122, 255),(201, 120, 255),(255, 120, 237),(255, 120, 169),(255, 120, 120),(255,255,255),(219, 182, 15)] #arbitrary bill generated pallet
+		#dark = [(0,0,0),(156, 0, 0),(156, 117, 0),(102, 77, 48),(107, 107, 107),(17, 0, 255),(67, 0, 138),(150, 57, 153),(21, 115, 24),(219, 182, 15)]
+		dark = [(0, 0, 0), (0, 0, 170), (0, 170, 0), (0, 170, 170), (170, 0, 0), (170, 0, 170), (170, 85, 0), (170, 170, 170), (85, 85, 85)] #EGA pallet
+		bright = [(85, 85, 255), (85, 255, 85), (85, 255, 255), (255, 85, 85), (255, 85, 255), (255, 255, 85), (255, 255, 255)]
+
+		fgGroup = random.choice(['Bright','Dark'])
+		if fgGroup == 'Bright':
+			self.fgSet = 'bright'
+			fg1 = random.choice(bright)
+			fg2 = random.choice(bright)
+			bg1 = random.choice(dark)
+			bg2 = random.choice(dark)
+		else:
+			self.fgSet = 'dark'
+			bg1 = random.choice(bright)
+			bg2 = random.choice(bright)
+			fg1 = random.choice(dark)
+			fg2 = random.choice(dark)
+		return fg1, fg2, bg1, bg2
 	def generateColorTuplesOld(self):
 		fg1 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
 		fg2 = (random.choice(self.colorlist),random.choice(self.colorlist),random.choice(self.colorlist))
@@ -456,7 +480,7 @@ class piVideoMusic:
 
 		return fg1, fg2, bg1, bg2
 	def generateColorTuples(self):
-		return self.generateColorTuplesNew()
+		return self.generateColorTuplesSet()
 	def refreshCurrentDisplay(self):
 		newData = {}
 		newData['FGcolorTuple'], newData['FGcolorTuple2'], newData['BGcolorTuple1'], newData['BGcolorTuple2'] = self.generateColorTuples()
@@ -474,9 +498,11 @@ class piVideoMusic:
 				# change the value to False, to exit the main loop
 				self.running = False
 	def lintoaudio(self,vector_in):
-		linBinSize = round(self.RATE/(2*self.FFTLEN))
+		linBinSize = round(self.RATE/(2*self.fftArray.shape[0]))
 		result = np.zeros(len(self.LogPts)-1)
-		# print("Diagnostics:")
+		# if self.diagCount < 20:
+		# 	print("Diagnostics:")
+		# print(f'\t{vector_in}')
 		for idx in range(len(self.LogPts)-1):
 			startFreq = self.LogPts[idx]
 			endFreq = self.LogPts[idx+1]
@@ -485,23 +511,29 @@ class piVideoMusic:
 
 			startBinMaxF = (startBin+1)*linBinSize
 			startBinFrac = (startBinMaxF - startFreq)/linBinSize
-			if startBin == endBin:
-				startBinFrac = 0
 
 			endBinMinF = endBin*linBinSize
 			endBinFrac = (endFreq-endBinMinF)/linBinSize
+
+			if startBin == endBin:
+				endBinFrac = (endFreq-startFreq)/linBinSize
+				startBinFrac = 0
+
 
 			binAccum = 0
 			binAccum = vector_in[startBin]*startBinFrac
 			for binNum in range(startBin+1,endBin):
 				binAccum = binAccum + vector_in[binNum]
 			binAccum = binAccum + vector_in[endBin]*endBinFrac
-			result[idx] = binAccum/(endFreq-startFreq)*5
-
+			scaleFac = (endFreq-startFreq)
+			result[idx] = binAccum/scaleFac*75
 			#diagnostics.
-			# print(f'\tidx:{idx}\tstartBin:{startBin}\tendBin:{endBin}\tstartFreq:{startFreq}\tendFreq:{endFreq}\tstartBinMaxF:{startBinMaxF}\tendBinMinF:{endBinMinF}\tstartBinFrac:{startBinFrac}\tendBinFrac:{endBinFrac}')
+			# if self.diagCount < 20:
+			# 	print(f'\tidx:{idx}\tstartBin:{startBin}\tendBin:{endBin}\tstartFreq:{startFreq}\tendFreq:{endFreq}\tstartBinMaxF:{startBinMaxF}\tendBinMinF:{endBinMinF}\tstartBinFrac:{startBinFrac}\tendBinFrac:{endBinFrac}\tscaleFac:{scaleFac}\tbinAccum:{binAccum}')
 
-
+		# if self.diagCount < 20:
+		# 	self.diagCount = self.diagCount + 1
+		# 	print(result)
 		return result
 
 
@@ -544,8 +576,9 @@ class piVideoMusic:
 		self.digitalGain = self.agc(data,newPk)
 		self.signal_pk = peakDecay(newPk*self.digitalGain, self.signal_pk, self.tau, self.CHUNK, self.RATE)
 		#compute fft
-		newFrame1 = np.array(self.fftwindow(data[-self.CHUNK*self.nFFTFrames:]))
-		newFrame2 = np.array(self.fftwindow(data[-int(self.CHUNK*(1+self.FFTOverlap)*self.nFFTFrames):-int(self.CHUNK*self.FFTOverlap*self.nFFTFrames)]))
+		data = np.diff(data)
+		newFrame1 = np.array(self.fftwindow(data[-self.CHUNK*self.nFFTFrames::4]))
+		newFrame2 = np.array(self.fftwindow(data[-int(self.CHUNK*(1+self.FFTOverlap)*self.nFFTFrames):-int(self.CHUNK*self.FFTOverlap*self.nFFTFrames):4]))
 		newFrame = np.column_stack((newFrame1,newFrame2))
 		self.fftArray = shiftIn2DCols(self.fftArray, newFrame)
 
@@ -556,12 +589,12 @@ class piVideoMusic:
 		if(currentTime > nextChangeTime):
 			newFG = ListDiff(displayFunctions,[currentDisplay])
 			newBG = ListDiff(backgroundFunctions,[currentBackground])
+			currentDisplayData=self.refreshCurrentDisplay()
 			if newFG:
 				currentDisplay = random.choice(newFG) #don't hop to the same display
 			if newBG:
 				currentBackground = random.choice(newBG) #don't hop to the same display
 			nextChangeTime = currentTime + random.randrange(3,7)
-			currentDisplayData=self.refreshCurrentDisplay()
 
 		screen.fill((0,0,0))
 		currentBackground(self,data[-5000:], screen)
@@ -741,9 +774,14 @@ def spectrogram(self,data,screen):
 		specArray = np.transpose(signal.resample (self.fftArray, 64, axis = 0))
 		blitArray = np.zeros((specArray.shape[0],specArray.shape[1],3))
 		specRes = np.clip(specArray/5,0,255)
-		blitArray[:,:,0] = specRes * self.currentDisplayData['BGcolorTuple1'][0]/255
-		blitArray[:,:,1] = specRes * self.currentDisplayData['BGcolorTuple1'][1]/255
-		blitArray[:,:,2] = specRes * self.currentDisplayData['BGcolorTuple1'][2]/255
+		if self.fgSet == 'dark':
+			blitArray[:,:,0] = specRes * (self.currentDisplayData['BGcolorTuple1'][0]/511 + 0.5)
+			blitArray[:,:,1] = specRes * (self.currentDisplayData['BGcolorTuple1'][1]/511 + 0.5)
+			blitArray[:,:,2] = specRes * (self.currentDisplayData['BGcolorTuple1'][2]/511 + 0.5)
+		else:
+			blitArray[:,:,0] = 1 - specRes * (self.currentDisplayData['BGcolorTuple1'][0]/511 + 0.5)
+			blitArray[:,:,1] = 1 - specRes * (self.currentDisplayData['BGcolorTuple1'][1]/511 + 0.5)
+			blitArray[:,:,2] = 1 - specRes * (self.currentDisplayData['BGcolorTuple1'][2]/511 + 0.5)
 		self.currentDisplayData['blitArray'] = blitArray
 	else:
 		self.currentDisplayData['blitArray'] = np.roll(self.currentDisplayData['blitArray'],-1,0)
@@ -943,7 +981,7 @@ def fftHill(self, data, screen):
 	nrows = 20
 	nsamp = 50
 	x_max = self.WIDTH/5
-	y_max = self.HEIGHT*1.3
+	y_max = self.HEIGHT*1.5
 	x_stride = x_max/nrows
 	y_stride = y_max/nrows
 	z_stride = 4
@@ -965,7 +1003,7 @@ def fftHill(self, data, screen):
 			self.persistantDisplayData['fftHill_xoff'][row] = x_max - x_stride * row
 			self.persistantDisplayData['fftHill_yoff'][row] = y_max - (a * (row ** 2) + b * row + c) #y_start - y_step_shrink * row * row - y_stride * row
 	if not 'fftHill_buffer' in self.currentDisplayData:
-		self.currentDisplayData['fftHill_scale_fac'] = 8
+		self.currentDisplayData['fftHill_scale_fac'] = 3
 		self.currentDisplayData['fftHill_buffer'] = []
 		for row in range(0,nrows-1):
 			zoff = -(row+1)
@@ -985,8 +1023,10 @@ def fftHill(self, data, screen):
 
 def fftSignal(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']
-	sampledTuple = fftline(self.fftArray[:,-1], self.WIDTH,0,round(self.HEIGHT * 0.9),50)
-	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),10)
+	yoff = round(self.HEIGHT * 1.0)
+	sampledTuple = fftline(self.fftArray[:,-1],self.WIDTH,0,yoff,50,2)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),15)
+	pygame.draw.line(self.screen,color,(0,yoff-100),(self.WIDTH,yoff-100),15)
 
 def fftQuad(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']
@@ -994,10 +1034,10 @@ def fftQuad(self, data, screen):
 	sampledTuple2 = fftline(self.fftArray[:,-1], -self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),25)
 	sampledTuple3 = fftline(-1*self.fftArray[:,-1], self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),25)
 	sampledTuple4 = fftline(-1*self.fftArray[:,-1], -self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),25)
-	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple1).astype(np.int64),10)
-	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple2).astype(np.int64),10)
-	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple3).astype(np.int64),10)
-	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple4).astype(np.int64),10)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple1).astype(np.int64),15)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple2).astype(np.int64),15)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple3).astype(np.int64),15)
+	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple4).astype(np.int64),15)
 
 # run the main function only if this module is executed as the main script
 # (if you import this as a module then nothing is executed)
