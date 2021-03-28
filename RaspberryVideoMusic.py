@@ -595,6 +595,8 @@ class piVideoMusic:
 			if newBG:
 				currentBackground = random.choice(newBG) #don't hop to the same display
 			nextChangeTime = currentTime + random.randrange(3,7)
+			if 'noBackground' in self.currentDisplayData:
+				currentBackground = skip
 
 		screen.fill((0,0,0))
 		currentBackground(self,data[-5000:], screen)
@@ -862,7 +864,7 @@ def fftline(frame,width,xoff=0,yoff=0,nsamp=None,scale_denom=4):
 	return sampledTuple
 
 
-def fftSurf(frame,width,color=(0,0,0),nsamp=None,scale_denom=4): #draws an FFT frame on a surface and returns it.
+def fftSurf(frame,width,color=(0,0,0),nsamp=None,scale_denom=4, thickness=5): #draws an FFT frame on a surface and returns it.
 
 	if nsamp == None:
 		nsamp = width
@@ -880,7 +882,7 @@ def fftSurf(frame,width,color=(0,0,0),nsamp=None,scale_denom=4): #draws an FFT f
 		xoff = xoff + xstep
 	size = (int(width), int(frame_max))
 	surf = pygame.Surface(size, pygame.SRCALPHA)
-	pygame.draw.lines(surf,color,False,np.array(sampledTuple).astype(np.int64),5)
+	pygame.draw.lines(surf,color,False,np.array(sampledTuple).astype(np.int64),thickness)
 	return surf
 def fftWaterfall(self, data, screen): #old, inefficient, not pretty
 	color = self.currentDisplayData['FGcolorTuple']
@@ -1039,6 +1041,55 @@ def fftQuad(self, data, screen):
 	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple3).astype(np.int64),15)
 	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple4).astype(np.int64),15)
 
+def skip(self,data,screen):
+	#dummy placeholded function, do nothing.
+	return
+
+def outRun(self, data, screen):
+	nrows = 6
+	nsamp = 100
+	color = (85,255,255)
+	x_stride = 25
+	y_max = self.HEIGHT
+	if not 'outrun_flag' in self.currentDisplayData:
+		self.currentDisplayData['outrun_flag'] = True
+		self.currentDisplayData['noBackground'] = True
+		self.currentDisplayData['outrunbg'] = pygame.image.load("outrunbg.png")
+		self.currentDisplayData['outrunfg'] = pygame.image.load("outrunfg.png")
+
+		self.currentDisplayData['outrun_xoff'] = np.zeros(nrows)
+		self.currentDisplayData['outrun_yoff'] = np.zeros(nrows)
+		for row in range(0,nrows-1):
+			self.currentDisplayData['outrun_xoff'][row] = 0# - x_stride * row
+			self.currentDisplayData['outrun_yoff'][row] = y_max - 50 * (nrows - row - 2) + 2
+
+	if not 'outrun_buffer' in self.currentDisplayData:
+		self.currentDisplayData['outrun_scale_fac'] = 3
+		self.currentDisplayData['outrun_buffer'] = []
+		for row in range(0,nrows-1):
+			zoff = -(row+1)
+			nparr = (np.array(self.fftArray[:,zoff])**2)/2000
+			surf = fftSurf(nparr-np.min(nparr), self.WIDTH, color=color,nsamp=nsamp,scale_denom=self.currentDisplayData['outrun_scale_fac'],thickness = 2)
+			self.currentDisplayData['outrun_buffer'].append(surf)
+	else:
+		self.currentDisplayData['outrun_buffer'].pop()
+		nparr = (np.array(self.fftArray[:,-1])**2)/2000
+		surf = fftSurf(nparr-np.min(nparr), self.WIDTH, color=color,nsamp=nsamp,scale_denom=self.currentDisplayData['outrun_scale_fac'], thickness = 2)
+		self.currentDisplayData['outrun_buffer'].insert(0,surf)
+
+	screen.blit(self.currentDisplayData['outrunbg'], (0,0))
+
+	#draw beat here
+
+	screen.blit(self.currentDisplayData['outrunfg'], (0,58))
+
+	#draw FFT here.
+	for row in range(0,nrows-1):
+		zoff = -(row+1)
+		currentRow = self.currentDisplayData['outrun_buffer'][row]
+		w, h = currentRow.get_size()
+		self.screen.blit(currentRow, (int(self.currentDisplayData['outrun_xoff'][row]),int(self.currentDisplayData['outrun_yoff'][row]-h)))
+
 # run the main function only if this module is executed as the main script
 # (if you import this as a module then nothing is executed)
 
@@ -1054,7 +1105,7 @@ if __name__=="__main__":
 	parser.add_argument('-verbose', action="store_true", help="talk more")
 	args = parser.parse_args()
 	bgs = [spectrogram,background,peakDiamonds,meanDiamonds]
-	fgs = [fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart]
+	fgs = [outRun]#[fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart]
 	PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w, verbose=args.verbose) #
 	while PVM.running:
 		PVM.processEvent()
