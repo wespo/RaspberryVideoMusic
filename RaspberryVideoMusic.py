@@ -288,7 +288,7 @@ class piVideoMusic:
 		# self.Lp = np.pad(self.Lp,(0,self.CHUNK-len(self.Lp)),'edge')
 		# self.Lp = self.Lp / np.mean(self.Lp) / 1.2
 
-		self.fftArray = np.zeros([277,int(self.time_to_buf_fft*self.RATE/self.CHUNK)]) #np.zeros([self.FFTLEN,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
+		self.fftArray = np.zeros([self.FFTLEN,int(self.time_to_buf_fft*self.RATE/self.CHUNK)]) #np.zeros([self.FFTLEN,int(self.time_to_buf_fft*self.RATE/self.CHUNK)])
 
 		self.persistantDisplayData={}
 		self.currentDisplayData=self.refreshCurrentDisplay()
@@ -547,7 +547,7 @@ class piVideoMusic:
 		window = signal.hamming(len(data))
 		w_data = data * window
 		fft_data = np.absolute(rfft(w_data))
-		fft_data = 200 * np.log10(fft_data*self.digitalGain)
+		fft_data = 100 * np.log(fft_data*self.digitalGain)
 		fft_data = np.clip(np.nan_to_num(fft_data),0,1000)
 		return fft_data
 
@@ -583,8 +583,8 @@ class piVideoMusic:
 		self.signal_pk = peakDecay(newPk*self.digitalGain, self.signal_pk, self.tau, self.CHUNK, self.RATE)
 		#compute fft
 		data = np.diff(data)
-		newFrame1 = np.array(self.fftwindow(data[-self.CHUNK*self.nFFTFrames::4]))
-		newFrame2 = np.array(self.fftwindow(data[-int(self.CHUNK*(1+self.FFTOverlap)*self.nFFTFrames):-int(self.CHUNK*self.FFTOverlap*self.nFFTFrames):4]))
+		newFrame1 = np.array(self.fftwindow(data[-self.CHUNK*self.nFFTFrames::1]))
+		newFrame2 = np.array(self.fftwindow(data[-int(self.CHUNK*(1+self.FFTOverlap)*self.nFFTFrames):-int(self.CHUNK*self.FFTOverlap*self.nFFTFrames):1]))
 		newFrame = np.column_stack((newFrame1,newFrame2))
 		self.fftArray = shiftIn2DCols(self.fftArray, newFrame)
 
@@ -812,7 +812,7 @@ def spectrogram(self,data,screen):
 
 def barchartLogspace(self, data, screen):
 	# background(data,screen)
-	downsampled = self.lintoaudio(self.fftArray[:,-1])
+	downsampled = (self.lintoaudio(self.fftArray[:,-1])/750)**4
 	if not 'barchart_logspace' in self.currentDisplayData:
 		self.currentDisplayData['barchart_logspace'] = np.zeros(len(downsampled))-1
 		self.currentDisplayData['barchart_logspacePeaks'] = np.zeros(len(downsampled))
@@ -1065,6 +1065,29 @@ def skip(self,data,screen):
 	#dummy placeholded function, do nothing.
 	return
 
+def fftZoom(self,data,screen):
+	if self.thin:
+		thickness = 2
+	else:
+		thickness = 3
+	zoomMax = 162
+	zoomMin = 2
+	color = self.currentDisplayData['FGcolorTuple']
+	yoff = round(self.HEIGHT * 1.0)
+	# innerSample = 10*np.log((10**(self.fftArray[2:162,-1]/200))**2)**4/1000-10
+	innerSample = (self.fftArray[zoomMin:zoomMax,-1]/200)**4-30
+	samplesIn = np.clip(innerSample,0,None)
+	if not 'fftzoom_flag' in self.currentDisplayData:
+		self.currentDisplayData['fftzoom_flag'] = True
+		self.currentDisplayData['oldSamples'] = np.zeros(zoomMax-zoomMin)
+	samples = [peakDecay(samplesIn[x],self.currentDisplayData['oldSamples'][x],0.05,self.CHUNK,self.RATE) for x in range(len(samplesIn))]
+	self.currentDisplayData['oldSamples'] = samples
+	XOFF = int(self.WIDTH/2)
+	for sample,x in zip(samples,range(len(samples))):
+		pygame.draw.line(self.screen,color,(XOFF+x*2*thickness,self.HEIGHT),(XOFF+x*2*thickness,self.HEIGHT-sample),thickness)
+		pygame.draw.line(self.screen,color,(XOFF-x*2*thickness,self.HEIGHT),(XOFF-x*2*thickness,self.HEIGHT-sample),thickness)
+	return
+
 def outRun(self, data, screen):
 	nrows = 9 #number of rows to display
 	ncols = 50 #number of columns to display
@@ -1081,7 +1104,7 @@ def outRun(self, data, screen):
 		self.currentDisplayData['outrun_flag'] = True
 		self.currentDisplayData['noBackground'] = True
 		self.currentDisplayData['outrunbg'] = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),"outrunbg.png"))
-		self.currentDisplayData['extendChangeTime'] = random.randrange(10,20) #for some reason, simply extending the change time didn't work...
+		# self.currentDisplayData['extendChangeTime'] = random.randrange(5,10) #for some reason, simply extending the change time didn't work...
 		if self.thin:
 			imagefg = "outrunfg.png"
 		else:
@@ -1196,7 +1219,7 @@ if __name__=="__main__":
 	parser.add_argument('-verbose', action="store_true", help="talk more")
 	args = parser.parse_args()
 	bgs = [spectrogram,background,peakDiamonds,meanDiamonds]
-	fgs = [outRun, fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart]
+	fgs = [fftZoom, outRun, fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart]
 	PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w, verbose=args.verbose, thin=args.t) #
 	while PVM.running:
 		PVM.processEvent()
