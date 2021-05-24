@@ -284,6 +284,10 @@ class piVideoMusic:
 		self.logSpaceIndices = np.floor(np.logspace(0.41,3.34,self.CHUNK)).astype(int) #consen for visual pleasantness.
 		# self.LogPts = [0,20,25,31.5,40,50,63,80,100,125,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000]
 		self.LogPts = [0,80,160,200,250,315,400,500,630,800,1000,1250,1600,2000,2500,3150,4000,5000,6300,8000,10000,12500,16000,20000]
+
+		self.colorsDark = [(0, 0, 0), (0, 0, 170), (0, 170, 0), (0, 170, 170), (170, 0, 0), (170, 0, 170), (170, 85, 0), (170, 170, 170), (85, 85, 85)] #EGA pallet
+		self.colorsBright = [(85, 85, 255), (85, 255, 85), (85, 255, 255), (255, 85, 85), (255, 85, 255), (255, 255, 85), (255, 255, 255)]
+
 		# self.Lp = elc(60,np.linspace(20,12500,1250)) #1250 is a magic constant, should be computed from CHUNK and RATE to get the the number of bins between 20 and 12500Hz (limits of elc function)
 		# self.Lp = np.pad(self.Lp,(0,self.CHUNK-len(self.Lp)),'edge')
 		# self.Lp = self.Lp / np.mean(self.Lp) / 1.2
@@ -372,8 +376,8 @@ class piVideoMusic:
 	def generateColorTuplesSet(self):
 		#bright = [(235, 52, 52),(235, 122, 52),(255, 230, 0),(0, 255, 128),(0, 255, 255),(120, 122, 255),(201, 120, 255),(255, 120, 237),(255, 120, 169),(255, 120, 120),(255,255,255),(219, 182, 15)] #arbitrary bill generated pallet
 		#dark = [(0,0,0),(156, 0, 0),(156, 117, 0),(102, 77, 48),(107, 107, 107),(17, 0, 255),(67, 0, 138),(150, 57, 153),(21, 115, 24),(219, 182, 15)]
-		dark = [(0, 0, 0), (0, 0, 170), (0, 170, 0), (0, 170, 170), (170, 0, 0), (170, 0, 170), (170, 85, 0), (170, 170, 170), (85, 85, 85)] #EGA pallet
-		bright = [(85, 85, 255), (85, 255, 85), (85, 255, 255), (255, 85, 85), (255, 85, 255), (255, 255, 85), (255, 255, 255)]
+		dark = self.colorsDark
+		bright = self.colorsBright
 
 		fgGroup = random.choice(['Bright','Dark'])
 		if fgGroup == 'Bright':
@@ -1040,11 +1044,19 @@ def fftSignal(self, data, screen):
 		thickness = 5
 	else:
 		thickness = 15
+
+	if not 'fftSignal_flag' in self.currentDisplayData:
+		self.currentDisplayData['fftSignal_flag'] = True
+		self.currentDisplayData['oldSamples'] = np.zeros(self.FFTLEN)
 	color = self.currentDisplayData['FGcolorTuple']
 	yoff = round(self.HEIGHT * 1.0)
-	sampledTuple = fftline(self.fftArray[:,-1],self.WIDTH,0,yoff,50,2)
+	floor = 100
+	samples = np.clip(self.fftArray[:,-1],0,None)
+	samples = [peakDecay(samples[x],self.currentDisplayData['oldSamples'][x],0.05,self.CHUNK,self.RATE) for x in range(len(samples))]
+	self.currentDisplayData['oldSamples'] = samples
+	sampledTuple = fftline(samples,self.WIDTH,0,yoff,50,2)
 	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple).astype(np.int64),thickness)
-	pygame.draw.line(self.screen,color,(0,yoff-100),(self.WIDTH,yoff-100),thickness)
+	pygame.draw.line(self.screen,color,(0,yoff-floor),(self.WIDTH,yoff-floor),thickness)
 
 def fftQuad(self, data, screen):
 	if self.thin:
@@ -1088,6 +1100,35 @@ def fftZoom(self,data,screen):
 		pygame.draw.line(self.screen,color,(XOFF-x*2*thickness,self.HEIGHT),(XOFF-x*2*thickness,self.HEIGHT-sample),thickness)
 	return
 
+def drops(self,data,screen):
+	# background(data,screen)
+	if not 'barchart_minfft' in self.currentDisplayData:
+		self.currentDisplayData['barchart_minfft'] = np.zeros(self.numBars)-1
+		self.currentDisplayData['barchart_fftBargraphPeaks'] = np.zeros(self.numBars)
+		self.currentDisplayData['surf'] = pygame.Surface((self.WIDTH,self.HEIGHT), pygame.SRCALPHA)
+		self.currentDisplayData['surf'].fill(random.choice(self.colorsDark+self.colorsBright))
+
+	downsampled = signal.resample(self.fftArray[:,-1], self.numBars)
+	downsampled = downsampled * 0.75
+	#compute peaks
+	for channel in range(len(downsampled)):
+		if self.currentDisplayData['barchart_minfft'][channel] == -1: #check if minfft is initialized.
+			self.currentDisplayData['barchart_minfft'][channel] = np.abs(downsampled[channel])
+		if self.currentDisplayData['barchart_minfft'][channel] > downsampled[channel]: #if the new sample is less than the minimum, update the minimum.
+			self.currentDisplayData['barchart_minfft'][channel] = np.abs(downsampled[channel])
+		downsampled[channel] = np.abs(downsampled[channel] - self.currentDisplayData['barchart_minfft'][channel])
+		self.currentDisplayData['barchart_fftBargraphPeaks'][channel] = peakDecay(downsampled[channel], self.currentDisplayData['barchart_fftBargraphPeaks'][channel], self.tau*5, self.CHUNK, self.RATE)
+	#draw bars
+	barWidth = int(self.WIDTH/(self.numBars+4))
+	for xIdx in range(self.numBars):
+		color = random.choice(self.colorsDark+self.colorsBright)
+		yPos = random.randrange(0,self.HEIGHT)
+		# xPos = int((xIdx+1) / (self.numBars+1) * self.WIDTH)
+		xPos = random.randrange(0,self.WIDTH)
+		pygame.draw.circle(self.currentDisplayData['surf'],color,(xPos,yPos),int(downsampled[xIdx]/10))
+	screen.blit(self.currentDisplayData['surf'], (0,0))
+	return
+
 def outRun(self, data, screen):
 	nrows = 9 #number of rows to display
 	ncols = 50 #number of columns to display
@@ -1119,7 +1160,9 @@ def outRun(self, data, screen):
 		self.currentDisplayData['minArray'] = np.full(ncols, np.inf)
 
 		for x in range(min(self.fftArray.shape[1],nbuf)):
-			self.currentDisplayData['specArray'][:,x] = signal.resample(self.fftArray[:,-(x+1)], ncols, axis = 0)**2 #output buffer is filled with columns (axis 2) containing FFTs from most recent to least recent. Most recent has index 0, least recent has index N
+			sampleData = self.fftArray[:,-(x+1)]
+			# sampleData = np.concatenate((np.flip(self.fftArray[0:300,-(x+1)]), self.fftArray[0:300,-(x+1)]))*1.1
+			self.currentDisplayData['specArray'][:,x] = signal.resample(sampleData, ncols, axis = 0)**2 #output buffer is filled with columns (axis 2) containing FFTs from most recent to least recent. Most recent has index 0, least recent has index N
 			denom = 300000 #np.amax(self.currentDisplayData['specArray'][:,x])
 			if denom == 0:
 				denom = 1
@@ -1129,7 +1172,9 @@ def outRun(self, data, screen):
 			#note to self, try squaring data...
 	else: #update spectrogram buffer.
 		self.currentDisplayData['specArray'] = np.roll(self.currentDisplayData['specArray'],1,1) #roll array right by one.
-		self.currentDisplayData['specArray'][:,0] = signal.resample(self.fftArray[:,-1], ncols, axis = 0)**2 #overwrite the newest element with the newest one from the fft array
+		sampleData = self.fftArray[:,-1]
+		# sampleData = np.concatenate((np.flip(self.fftArray[0:300,-1]), self.fftArray[0:300,-1]))*1.1
+		self.currentDisplayData['specArray'][:,0] = signal.resample(sampleData, ncols, axis = 0)**2 #overwrite the newest element with the newest one from the fft array
 		denom = 300000 #np.amax(self.currentDisplayData['specArray'][:,0])
 		if denom == 0:
 			denom = 1
@@ -1202,6 +1247,136 @@ def outRun(self, data, screen):
 		pygame.draw.lines(self.screen,color,False,np.array(lastRow).astype(np.int64),thickness)
 		lastRow = rowTuples
 
+def outRunZoom(self, data, screen):
+	nrows = 9 #number of rows to display
+	ncols = 50 #number of columns to display
+	nbuf = 20 #number of rows to buffer
+	color = (85,255,255)
+	sunColor = (85,255,255)
+	zoomMax = 102
+	zoomMin = 2
+	if self.thin:
+		thickness = 1
+	else:
+		thickness = 2
+	sunPos = [[(180,205),(500,205)],[(180,190),(500,190)],[(180,175),(500,175)],[(180,160),(461,160)],[(178,145),(460,145)],[(182,130),(457,130)],[(185,115),(453,115)]]
+	if not 'outrun_flag' in self.currentDisplayData:
+		#Setup basic flags
+		self.currentDisplayData['outrun_flag'] = True
+		self.currentDisplayData['noBackground'] = True
+		self.currentDisplayData['outrunbg'] = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),"outrunbg.png"))
+		# self.currentDisplayData['extendChangeTime'] = random.randrange(5,10) #for some reason, simply extending the change time didn't work...
+		if self.thin:
+			imagefg = "outrunfg.png"
+		else:
+			imagefg = "outrunfg_thick.png"
+		self.currentDisplayData['outrunfg'] = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),imagefg))
+		self.currentDisplayData['beatBuffer'] = np.zeros(len(sunPos))
+
+	#compute grid
+	if not 'outrun_buffer' in self.currentDisplayData: #compute spectrogram buffer.
+		self.currentDisplayData['specArray'] = np.zeros((ncols,nbuf))
+		self.currentDisplayData['outrun_buffer'] = True
+		self.currentDisplayData['minArray'] = np.full(ncols, np.inf)
+		self.currentDisplayData['outrun_lastframe'] = np.zeros((zoomMax-zoomMin))
+
+		for x in range(min(self.fftArray.shape[1],nbuf)):
+			# sampleData = self.fftArray[:,-(x+1)]
+			sampleData = (self.fftArray[zoomMin:zoomMax,-(x+1)]/150)**4-30
+			sampleData = np.clip(sampleData,0,None)
+			sampleData = [peakDecay(sampleData[x],self.currentDisplayData['outrun_lastframe'][x],0.05,self.CHUNK,self.RATE) for x in range(len(sampleData))]
+			self.currentDisplayData['outrun_lastframe'] = sampleData
+			sampleData = np.concatenate((np.flip(sampleData),sampleData))
+			# sampleData = np.concatenate((np.flip(self.fftArray[0:300,-(x+1)]), self.fftArray[0:300,-(x+1)]))*1.1
+			self.currentDisplayData['specArray'][:,x] = signal.resample(sampleData, ncols, axis = 0)**2 #output buffer is filled with columns (axis 2) containing FFTs from most recent to least recent. Most recent has index 0, least recent has index N
+			denom = 300000 #np.amax(self.currentDisplayData['specArray'][:,x])
+			if denom == 0:
+				denom = 1
+			self.currentDisplayData['specArray'][:,x] = self.currentDisplayData['specArray'][:,x] / denom * 40
+			self.currentDisplayData['minArray'] = np.minimum(self.currentDisplayData['specArray'][:,x], self.currentDisplayData['minArray'])
+			self.currentDisplayData['specArray'][:,x] = self.currentDisplayData['specArray'][:,x] - self.currentDisplayData['minArray']#self.currentDisplayData['minArray']
+			#note to self, try squaring data...
+	else: #update spectrogram buffer.
+		self.currentDisplayData['specArray'] = np.roll(self.currentDisplayData['specArray'],1,1) #roll array right by one.
+		# sampleData = self.fftArray[:,-1]
+		sampleData = (self.fftArray[zoomMin:zoomMax,-1]/150)**4-30
+		sampleData = np.clip(sampleData,0,None)
+		sampleData = [peakDecay(sampleData[x],self.currentDisplayData['outrun_lastframe'][x],0.05,self.CHUNK,self.RATE) for x in range(len(sampleData))]
+		self.currentDisplayData['outrun_lastframe'] = sampleData
+		sampleData = np.concatenate((np.flip(sampleData),sampleData))
+		# sampleData = np.concatenate((np.flip(self.fftArray[0:300,-1]), self.fftArray[0:300,-1]))*1.1
+		self.currentDisplayData['specArray'][:,0] = signal.resample(sampleData, ncols, axis = 0)**2 #overwrite the newest element with the newest one from the fft array
+		denom = 300000 #np.amax(self.currentDisplayData['specArray'][:,0])
+		if denom == 0:
+			denom = 1
+		self.currentDisplayData['specArray'][:,0] = self.currentDisplayData['specArray'][:,0] / denom*40
+		self.currentDisplayData['minArray'] = np.minimum(self.currentDisplayData['specArray'][:,0], self.currentDisplayData['minArray'])
+		self.currentDisplayData['specArray'][:,0] = self.currentDisplayData['specArray'][:,0] - self.currentDisplayData['minArray']#self.currentDisplayData['minArray']
+
+	#compute sun lines
+	colorBG = np.clip(self.signal_pk/1600,0,1)
+	colorBG = np.clip((1-colorBG)*1.5,0,1)
+	self.currentDisplayData['beatBuffer'] = np.roll(self.currentDisplayData['beatBuffer'],1,0)
+	self.currentDisplayData['beatBuffer'][0] = colorBG
+
+
+	dsa = signal.resample(self.currentDisplayData['specArray'],nrows,axis=1)
+	# printArray(dsa, False)
+
+	#background image
+	screen.blit(self.currentDisplayData['outrunbg'], (0,0))
+
+	#draw beat here
+	for idx in range(len(sunPos)):
+		colorRef = self.currentDisplayData['beatBuffer'][idx]
+		colorBG = 0.6*(1.0-colorRef)+0.4
+		colorBG = colorsys.hsv_to_rgb(0.83, 1, colorBG)
+		colorBG = (colorBG[0]*255,colorBG[1]*255,colorBG[2]*255)
+		linePts = sunPos[idx]
+		pygame.draw.line(self.screen, colorBG, linePts[0], linePts[1], 7-idx)
+
+
+	#foregorund image
+	screen.blit(self.currentDisplayData['outrunfg'], (0,58))
+
+	#draw grid here
+	#draw FFT here.
+	w = self.WIDTH
+	w_delta = 100
+	w_step = np.ceil(w/ncols)
+	y_zero = 215
+	y_step = 20
+	y = y_zero
+	h = self.HEIGHT - y
+	y_delta = 1.2
+
+	lastRow = []
+	x = 0
+	x_0 = 0
+	for col in range(ncols):
+		x = x_0 + w_step*col
+		lastRow.append((int(x),int(y_zero)))
+	for row in range(nrows):
+		#generate row:
+		rowTuples = []
+
+		w_step = (w+(row+1)*w_delta)/ncols
+		x_0 = -w_delta/2 *(row+1)
+
+		for col in range(ncols):
+			x = x_0 + w_step*col
+			rowTuples.append((int(x),int(y-dsa[col,row])))
+		y = y + y_step
+		y_step = np.ceil(y_step*y_delta)
+
+		for col in range(0,ncols-1,2):
+			if col != 0:
+				pygame.draw.polygon(self.screen,(0,0,0),[lastRow[col-1], rowTuples[col-1],rowTuples[col],rowTuples[col+1],lastRow[col+1],lastRow[col]])
+				# pygame.draw.polygon(self.screen,color,[lastRow[col-1], rowTuples[col-1],rowTuples[col],rowTuples[col+1],lastRow[col+1],lastRow[col]],1)
+			if (col % 2) == 0:
+				pygame.draw.line(self.screen, color, lastRow[col], rowTuples[col], thickness)
+		pygame.draw.lines(self.screen,color,False,np.array(lastRow).astype(np.int64),thickness)
+		lastRow = rowTuples
 
 # run the main function only if this module is executed as the main script
 # (if you import this as a module then nothing is executed)
@@ -1218,8 +1393,8 @@ if __name__=="__main__":
 	parser.add_argument('-w', action="store_false", help="windowed mode")
 	parser.add_argument('-verbose', action="store_true", help="talk more")
 	args = parser.parse_args()
-	bgs = [spectrogram,background,peakDiamonds,meanDiamonds]
-	fgs = [fftZoom, outRun, fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart]
+	bgs = [drops,spectrogram,background,peakDiamonds,meanDiamonds]
+	fgs = [fftZoom, outRun, fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart] #outRunZoom
 	PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w, verbose=args.verbose, thin=args.t) #
 	while PVM.running:
 		PVM.processEvent()
