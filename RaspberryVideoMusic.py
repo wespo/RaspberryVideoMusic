@@ -5,7 +5,7 @@ import pyaudio
 import numpy as np
 from scipy import signal
 from scipy import interpolate
-from scipy.fft import rfft, fftshift
+from scipy.fftpack import rfft, fftshift
 import time
 import random
 import colorsys
@@ -258,8 +258,8 @@ class piVideoMusic:
 		self.FFTLEN = self.nFFTFrames*(self.CHUNK//2 + 1)
 		self.FFTOverlap = 1/2 #offset of next frame. 0=frameA&B are identical.
 		self.RATE=44100
-		self.WIDTH=640
-		self.HEIGHT=480
+		self.WIDTH=650
+		self.HEIGHT=450
 		self.time_to_buf_fft = 4 #sec
 		self.signal_pk = 0
 		self.colorlist = range(0,256,32)
@@ -313,7 +313,7 @@ class piVideoMusic:
 
 			# Check which frame buffer drivers are available
 			# Start with fbcon since directfb hangs with composite output
-			drivers = ['fbcon', 'directfb', 'svgalib']
+			drivers = ['fbcon', 'directfb', 'svgalib','dummy']
 			found = False
 			for driver in drivers:
 				# Make sure that SDL_VIDEODRIVER is set
@@ -329,11 +329,19 @@ class piVideoMusic:
 
 			if not found:
 			    raise Exception('No suitable video driver found!')
-			size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
+			# pygame.display.set_mode((480, 640))
+			# pygame.display.set_mode((self.WIDTH,self.HEIGHT))
+			# size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
+			size = (self.WIDTH,self.HEIGHT)
+			self.size = size
+			# self.WIDTH = pygame.display.Info().current_w
+			# self.HEIGHT = pygame.display.Info().current_h
+			print(pygame.display.list_modes())
+			print(size)
 			flags = pygame.DOUBLEBUF | pygame.HWSURFACE | pygame.FULLSCREEN
-			self.screen = pygame.display.set_mode(size, flags)
-			surface = pygame.Surface((640,480),pygame.FULLSCREEN)
-			pygame.display.set_mode((640,480),pygame.FULLSCREEN)
+			self.screen = pygame.display.set_mode((size), flags)
+			surface = pygame.Surface(size,pygame.FULLSCREEN)
+			# pygame.display.set_mode((640,480),pygame.FULLSCREEN)
 			pySurface = surface.convert()
 			# Initialise font support
 			pygame.font.init()
@@ -610,8 +618,8 @@ class piVideoMusic:
 			if newBG:
 				currentBackground = random.choice(newBG) #don't hop to the same display
 			nextChangeTime = currentTime + random.randrange(3,7)
-			if 'noBackground' in self.currentDisplayData:
-				currentBackground = skip
+		if 'noBackground' in self.currentDisplayData:
+			currentBackground = skip
 
 		screen.fill((0,0,0))
 		currentBackground(self,data[-5000:], screen)
@@ -651,15 +659,15 @@ def meanDiamonds(self,data,screen):
 	zerArray[:,:,2] = resArray*tempColorTuple[2]
 
 	surf = pygame.surfarray.make_surface(zerArray)
-	surfa = pygame.transform.scale(surf,(320,240))
+	surfa = pygame.transform.scale(surf,(int(self.WIDTH/2),int(self.HEIGHT/2)))
 	surfb = pygame.transform.flip(surfa,True, False)
 	surfc = pygame.transform.flip(surfa, False ,True)
 	surfd = pygame.transform.flip(surfa,True, True)
 
 	screen.blit(surfb, (0,0))
-	screen.blit(surfa, (320,0))
-	screen.blit(surfd, (0,240))
-	screen.blit(surfc, (320,240))
+	screen.blit(surfa, (int(self.WIDTH/2),0))
+	screen.blit(surfd, (0,int(self.HEIGHT/2)))
+	screen.blit(surfc, (int(self.WIDTH/2),int(self.HEIGHT/2)))
 
 	#timeSignal(data,screen,(random.randint(0,255),random.randint(0,255),random.randint(0,255)))
 	# timeSignal(data,screen,(0,255,0))
@@ -709,15 +717,15 @@ def meanFreq(self,data,screen): #needs tuning
 	zerArray[:,:,2] = resArray
 
 	surf = pygame.surfarray.make_surface(zerArray)
-	surfa = pygame.transform.scale(surf,(320,240))
+	surfa = pygame.transform.scale(surf,(int(self.WIDTH/2),int(self.HEIGHT/2)))
 	surfb = pygame.transform.flip(surfa,True, False)
 	surfc = pygame.transform.flip(surfa, False ,True)
 	surfd = pygame.transform.flip(surfa,True, True)
 
 	screen.blit(surfb, (0,0))
-	screen.blit(surfa, (320,0))
-	screen.blit(surfd, (0,240))
-	screen.blit(surfc, (320,240))
+	screen.blit(surfa, (int(self.WIDTH/2),0))
+	screen.blit(surfd, (0,int(self.HEIGHT/2)))
+	screen.blit(surfc, (int(self.WIDTH/2),int(self.HEIGHT/2)))
 
 	# fftSignal(data,screen,(0,255,0))
 	# toc()
@@ -766,7 +774,7 @@ def background(self, data, screen):
 	screen.fill(colorBG)
 
 def peakLine(self, data, screen):
-	pygame.draw.line(screen, (255,0,0), (0,self.HEIGHT/2-self.signal_pk), (self.WIDTH,self.HEIGHT/2-signal_pk), 3)
+	pygame.draw.line(screen, (255,0,0), (0,int(self.HEIGHT/2)-self.signal_pk), (self.WIDTH,int(self.HEIGHT/2)-signal_pk), 3)
 
 def timeSignal(self, data, screen, color = None):
 	if color == None:
@@ -777,7 +785,7 @@ def timeSignal(self, data, screen, color = None):
 	sampledTuple =[]
 	xoff = 0
 	xstep = self.WIDTH/len(downsampled)
-	yoff = self.HEIGHT/2 + np.mean(downsampled)
+	yoff = int(self.HEIGHT/2) + np.mean(downsampled)
 	for sample in downsampled:
 		sampledTuple.append((round(xoff),round(yoff-sample)))
 		xoff = xoff + xstep
@@ -808,7 +816,7 @@ def spectrogram(self,data,screen):
 		self.currentDisplayData['blitArray'][-1,:,2] = fftSlice * self.currentDisplayData['BGcolorTuple1'][2]
 
 	surf = pygame.surfarray.make_surface(self.currentDisplayData['blitArray'])
-	surfa = pygame.transform.scale(surf,(640,480))
+	surfa = pygame.transform.scale(surf,self.size)
 	# surfd = pygame.transform.flip(surfa,True, True)
 
 	screen.blit(surfa, (0,0))
@@ -929,7 +937,7 @@ def bargraphHill(self, data, screen):
 	nrows = 15
 	if not 'bargrahpHill_a' in self.persistantDisplayData:
 		c1 = (0,self.HEIGHT/4)
-		c2 = (nrows/3,self.HEIGHT/2)
+		c2 = (nrows/3,int(self.HEIGHT/2))
 		c3 = (nrows,-100)
 		x_mat = np.array([[c1[0]**2,c1[0],1], [c2[0]**2,c2[0],1], [c3[0]**2,c3[0],1]])
 		y_mat = np.array([[c1[1]],[c2[1]],[c3[1]]])
@@ -996,8 +1004,8 @@ def bargraphHill(self, data, screen):
 
 def fftHill(self, data, screen):
 	color = self.currentDisplayData['FGcolorTuple']
-	nrows = 20
-	nsamp = 50
+	nrows = 17
+	nsamp = 25
 	x_max = self.WIDTH/5
 	y_max = self.HEIGHT*1.5
 	x_stride = x_max/nrows
@@ -1064,10 +1072,10 @@ def fftQuad(self, data, screen):
 	else:
 		thickness = 15
 	color = self.currentDisplayData['FGcolorTuple']
-	sampledTuple1 = fftline(self.fftArray[:,-1], self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),25)
-	sampledTuple2 = fftline(self.fftArray[:,-1], -self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),25)
-	sampledTuple3 = fftline(-1*self.fftArray[:,-1], self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),25)
-	sampledTuple4 = fftline(-1*self.fftArray[:,-1], -self.WIDTH/2,self.WIDTH/2,round(self.HEIGHT * 0.5),25)
+	sampledTuple1 = fftline(self.fftArray[:,-1], int(self.WIDTH/2),int(self.WIDTH/2),round(self.HEIGHT * 0.5),25)
+	sampledTuple2 = fftline(self.fftArray[:,-1], -int(self.WIDTH/2),int(self.WIDTH/2),round(self.HEIGHT * 0.5),25)
+	sampledTuple3 = fftline(-1*self.fftArray[:,-1], int(self.WIDTH/2),int(self.WIDTH/2),round(self.HEIGHT * 0.5),25)
+	sampledTuple4 = fftline(-1*self.fftArray[:,-1], -int(self.WIDTH/2),int(self.WIDTH/2),round(self.HEIGHT * 0.5),25)
 	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple1).astype(np.int64),thickness)
 	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple2).astype(np.int64),thickness)
 	pygame.draw.lines(self.screen,color,False,np.array(sampledTuple3).astype(np.int64),thickness)
@@ -1096,13 +1104,14 @@ def fftZoom(self,data,screen):
 	self.currentDisplayData['oldSamples'] = samples
 	XOFF = int(self.WIDTH/2)
 	for sample,x in zip(samples,range(len(samples))):
-		pygame.draw.line(self.screen,color,(XOFF+x*2*thickness,self.HEIGHT),(XOFF+x*2*thickness,self.HEIGHT-sample),thickness)
-		pygame.draw.line(self.screen,color,(XOFF-x*2*thickness,self.HEIGHT),(XOFF-x*2*thickness,self.HEIGHT-sample),thickness)
+		pygame.draw.line(self.screen,color,(int(XOFF+x*2*thickness),int(self.HEIGHT)),(int(XOFF+x*2*thickness),int(self.HEIGHT-sample)),thickness)
+		pygame.draw.line(self.screen,color,(int(XOFF-x*2*thickness),int(self.HEIGHT)),(int(XOFF-x*2*thickness),int(self.HEIGHT-sample)),thickness)
 	return
 
-def drops(self,data,screen):
+def multiDrops(self,data,screen):
 	# background(data,screen)
-	if not 'barchart_minfft' in self.currentDisplayData:
+	if not 'multiDrops' in self.currentDisplayData:
+		self.currentDisplayData['multiDrops'] = True
 		self.currentDisplayData['barchart_minfft'] = np.zeros(self.numBars)-1
 		self.currentDisplayData['barchart_fftBargraphPeaks'] = np.zeros(self.numBars)
 		self.currentDisplayData['surf'] = pygame.Surface((self.WIDTH,self.HEIGHT), pygame.SRCALPHA)
@@ -1129,6 +1138,21 @@ def drops(self,data,screen):
 	screen.blit(self.currentDisplayData['surf'], (0,0))
 	return
 
+def drops(self,data,screen):
+	# background(data,screen)
+	if not 'drops' in self.currentDisplayData:
+		self.currentDisplayData['drops'] = True
+		self.currentDisplayData['surf'] = pygame.Surface((self.WIDTH,self.HEIGHT), pygame.SRCALPHA)
+		self.currentDisplayData['surf'].fill(random.choice(self.colorsDark+self.colorsBright))
+
+	color = random.choice(self.colorsDark+self.colorsBright)
+	yPos = random.randrange(0,self.HEIGHT)
+	# xPos = int((xIdx+1) / (self.numBars+1) * self.WIDTH)
+	xPos = random.randrange(0,self.WIDTH)
+	pygame.draw.circle(self.currentDisplayData['surf'],color,(xPos,yPos),int(self.signal_pk/100))
+	screen.blit(self.currentDisplayData['surf'], (0,0))
+	return
+
 def outRun(self, data, screen):
 	nrows = 9 #number of rows to display
 	ncols = 50 #number of columns to display
@@ -1139,19 +1163,29 @@ def outRun(self, data, screen):
 		thickness = 1
 	else:
 		thickness = 2
-	sunPos = [[(180,205),(500,205)],[(180,190),(500,190)],[(180,175),(500,175)],[(180,160),(461,160)],[(178,145),(460,145)],[(182,130),(457,130)],[(185,115),(453,115)]]
 	if not 'outrun_flag' in self.currentDisplayData:
 		#Setup basic flags
 		self.currentDisplayData['outrun_flag'] = True
 		self.currentDisplayData['noBackground'] = True
-		self.currentDisplayData['outrunbg'] = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),"outrunbg.png"))
+		self.currentDisplayData['sunPos'] = [[(180,205),(500,205)],[(180,190),(500,190)],[(180,175),(500,175)],[(180,160),(461,160)],[(178,145),(460,145)],[(182,130),(457,130)],[(185,115),(453,115)]]
+		picture = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),"outrunbg.png"))
+		picture = pygame.transform.scale(picture, self.size)
+		self.currentDisplayData['outrunbg'] = picture
+
 		# self.currentDisplayData['extendChangeTime'] = random.randrange(5,10) #for some reason, simply extending the change time didn't work...
 		if self.thin:
 			imagefg = "outrunfg.png"
 		else:
 			imagefg = "outrunfg_thick.png"
-		self.currentDisplayData['outrunfg'] = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),imagefg))
-		self.currentDisplayData['beatBuffer'] = np.zeros(len(sunPos))
+		picture = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),imagefg))
+
+		for n, x in enumerate(self.currentDisplayData['sunPos']):
+			self.currentDisplayData['sunPos'][n][0] = (x[0][0]*self.WIDTH/picture.get_width(),x[0][1])
+			self.currentDisplayData['sunPos'][n][1] = (x[1][0]*self.WIDTH/picture.get_width(),x[1][1])
+
+		picture = pygame.transform.scale(picture, (self.WIDTH,picture.get_height()))
+		self.currentDisplayData['outrunfg'] = picture
+		self.currentDisplayData['beatBuffer'] = np.zeros(len(self.currentDisplayData['sunPos']))
 
 	#compute grid
 	if not 'outrun_buffer' in self.currentDisplayData: #compute spectrogram buffer.
@@ -1196,12 +1230,12 @@ def outRun(self, data, screen):
 	screen.blit(self.currentDisplayData['outrunbg'], (0,0))
 
 	#draw beat here
-	for idx in range(len(sunPos)):
+	for idx in range(len(self.currentDisplayData['sunPos'])):
 		colorRef = self.currentDisplayData['beatBuffer'][idx]
 		colorBG = 0.6*(1.0-colorRef)+0.4
 		colorBG = colorsys.hsv_to_rgb(0.83, 1, colorBG)
 		colorBG = (colorBG[0]*255,colorBG[1]*255,colorBG[2]*255)
-		linePts = sunPos[idx]
+		linePts = self.currentDisplayData['sunPos'][idx]
 		pygame.draw.line(self.screen, colorBG, linePts[0], linePts[1], 7-idx)
 
 
@@ -1259,19 +1293,28 @@ def outRunZoom(self, data, screen):
 		thickness = 1
 	else:
 		thickness = 2
-	sunPos = [[(180,205),(500,205)],[(180,190),(500,190)],[(180,175),(500,175)],[(180,160),(461,160)],[(178,145),(460,145)],[(182,130),(457,130)],[(185,115),(453,115)]]
 	if not 'outrun_flag' in self.currentDisplayData:
 		#Setup basic flags
 		self.currentDisplayData['outrun_flag'] = True
 		self.currentDisplayData['noBackground'] = True
-		self.currentDisplayData['outrunbg'] = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),"outrunbg.png"))
+		self.currentDisplayData['sunPos'] = [[(180,205),(500,205)],[(180,190),(500,190)],[(180,175),(500,175)],[(180,160),(461,160)],[(178,145),(460,145)],[(182,130),(457,130)],[(185,115),(453,115)]]
+		picture = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),"outrunbg.png"))
+		picture = pygame.transform.scale(picture, self.size)
+		self.currentDisplayData['outrunbg'] = picture
 		# self.currentDisplayData['extendChangeTime'] = random.randrange(5,10) #for some reason, simply extending the change time didn't work...
 		if self.thin:
 			imagefg = "outrunfg.png"
 		else:
 			imagefg = "outrunfg_thick.png"
-		self.currentDisplayData['outrunfg'] = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),imagefg))
-		self.currentDisplayData['beatBuffer'] = np.zeros(len(sunPos))
+		picture = pygame.image.load(os.path.join(os.path.dirname(os.path.abspath(__file__)),imagefg))
+
+		for n, x in enumerate(self.currentDisplayData['sunPos']):
+			self.currentDisplayData['sunPos'][n][0] = (x[0][0]*self.WIDTH/picture.get_width(),x[0][1])
+			self.currentDisplayData['sunPos'][n][1] = (x[1][0]*self.WIDTH/picture.get_width(),x[1][1])
+
+		picture = pygame.transform.scale(picture, (self.WIDTH,picture.get_height()))
+		self.currentDisplayData['outrunfg'] = picture
+		self.currentDisplayData['beatBuffer'] = np.zeros(len(self.currentDisplayData['sunPos']))
 
 	#compute grid
 	if not 'outrun_buffer' in self.currentDisplayData: #compute spectrogram buffer.
@@ -1282,7 +1325,7 @@ def outRunZoom(self, data, screen):
 
 		for x in range(min(self.fftArray.shape[1],nbuf)):
 			# sampleData = self.fftArray[:,-(x+1)]
-			sampleData = (self.fftArray[zoomMin:zoomMax,-(x+1)]/150)**4-30
+			sampleData = (self.fftArray[zoomMin:zoomMax,-(x+1)]/170)**4-30
 			sampleData = np.clip(sampleData,0,None)
 			sampleData = [peakDecay(sampleData[x],self.currentDisplayData['outrun_lastframe'][x],0.05,self.CHUNK,self.RATE) for x in range(len(sampleData))]
 			self.currentDisplayData['outrun_lastframe'] = sampleData
@@ -1299,7 +1342,7 @@ def outRunZoom(self, data, screen):
 	else: #update spectrogram buffer.
 		self.currentDisplayData['specArray'] = np.roll(self.currentDisplayData['specArray'],1,1) #roll array right by one.
 		# sampleData = self.fftArray[:,-1]
-		sampleData = (self.fftArray[zoomMin:zoomMax,-1]/150)**4-30
+		sampleData = (self.fftArray[zoomMin:zoomMax,-1]/170)**4-30
 		sampleData = np.clip(sampleData,0,None)
 		sampleData = [peakDecay(sampleData[x],self.currentDisplayData['outrun_lastframe'][x],0.05,self.CHUNK,self.RATE) for x in range(len(sampleData))]
 		self.currentDisplayData['outrun_lastframe'] = sampleData
@@ -1327,12 +1370,12 @@ def outRunZoom(self, data, screen):
 	screen.blit(self.currentDisplayData['outrunbg'], (0,0))
 
 	#draw beat here
-	for idx in range(len(sunPos)):
+	for idx in range(len(self.currentDisplayData['sunPos'])):
 		colorRef = self.currentDisplayData['beatBuffer'][idx]
 		colorBG = 0.6*(1.0-colorRef)+0.4
 		colorBG = colorsys.hsv_to_rgb(0.83, 1, colorBG)
 		colorBG = (colorBG[0]*255,colorBG[1]*255,colorBG[2]*255)
-		linePts = sunPos[idx]
+		linePts = self.currentDisplayData['sunPos'][idx]
 		pygame.draw.line(self.screen, colorBG, linePts[0], linePts[1], 7-idx)
 
 
@@ -1380,21 +1423,23 @@ def outRunZoom(self, data, screen):
 
 # run the main function only if this module is executed as the main script
 # (if you import this as a module then nothing is executed)
+def main():
+    parser = argparse.ArgumentParser(description='Raspberry Pi Video Music. Inspired by the Atari Video Music system.')
+    parser.add_argument('-l', action="store_true", help="list audio and video interfaces")
+    parser.add_argument('-v', action="store", type=int, default = 0, help="Specify video interface (int)")
+    parser.add_argument('-a', action="store", type=int, default = 0, help="Specify audio interface (int)")
+    parser.add_argument('-t', action="store_true", help="Use thinner lines for high res screens")
+    parser.add_argument('-w', action="store_false", help="windowed mode")
+    parser.add_argument('-verbose', action="store_true", help="talk more")
+    args = parser.parse_args()
+    bgs = [drops,spectrogram,background,peakDiamonds,meanDiamonds]
+    fgs = [outRun, fftZoom, fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart] #outRunZoom
+    PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w, verbose=args.verbose, thin=args.t) #
+    while PVM.running:
+    	PVM.processEvent()
 
 if __name__=="__main__":
     # call the main function
     # main([timeSignal,meanFreq,meanDiamonds,timeBackground,fftBackground,peakDiamonds,barchart,spectrogram])
 
-	parser = argparse.ArgumentParser(description='Raspberry Pi Video Music. Inspired by the Atari Video Music system.')
-	parser.add_argument('-l', action="store_true", help="list audio and video interfaces")
-	parser.add_argument('-v', action="store", type=int, default = 0, help="Specify video interface (int)")
-	parser.add_argument('-a', action="store", type=int, default = 0, help="Specify audio interface (int)")
-	parser.add_argument('-t', action="store_true", help="Use thinner lines for high res screens")
-	parser.add_argument('-w', action="store_false", help="windowed mode")
-	parser.add_argument('-verbose', action="store_true", help="talk more")
-	args = parser.parse_args()
-	bgs = [drops,spectrogram,background,peakDiamonds,meanDiamonds]
-	fgs = [fftZoom, outRun, fftQuad, barchartLogspace, bargraphHill,timeSignal, fftSignal, fftHill, barchart] #outRunZoom
-	PVM = piVideoMusic(fgs,bgs,listFlag=args.l,videoInterface=args.v,audioInterface=args.a,fullscreen=args.w, verbose=args.verbose, thin=args.t) #
-	while PVM.running:
-		PVM.processEvent()
+	main()

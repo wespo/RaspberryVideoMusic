@@ -1,0 +1,11 @@
+[Unit]
+Description=Run RaspberryVideoMusic python Script
+After=multi-user.target
+
+[Service]
+Type=simple
+Restart=always
+ExecStart=sudo /usr/bin/python3 /home/pi/RaspberryVideoMusic/RaspberryVideoMusic.py
+
+[Install]
+WantedBy=multi-user.target
